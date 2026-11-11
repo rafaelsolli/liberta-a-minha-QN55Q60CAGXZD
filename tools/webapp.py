@@ -69,7 +69,36 @@ def read_config(path):
         'openPicksIn': 'nuvio' if values.get('open_picks_in', '').strip().lower() == 'nuvio' else 'apps',
         # 24 or 12 forces the clock; auto follows the language's catalogue.
         'clockFormat': values.get('clock_format', '').strip() if values.get('clock_format', '').strip() in ('24', '12') else 'auto',
+        # settings_on_tv=false: no Home Settings on the TV, and nothing saved there counts; every setting is this file's.
+        'settingsOnTv': values.get('settings_on_tv', 'true').strip().lower() != 'false',
+        'hideServices': [s.strip().lower() for s in values.get('hide_services', '').split(',') if s.strip()],
+        'saver': 'clock' if values.get('screensaver_shows', '').strip().lower() == 'clock' else 'photos',
+        'saverWatch': values.get('watch_from_screensaver', 'false').strip().lower() == 'true',
+        'dim': choice(values, 'dim', ('off', 'low', 'medium', 'high', 'auto'), 'off'),
+        'cards': int(choice(values, 'picks_per_tab', ('3', '4', '5', '6'), '3')),
+        'weather': values.get('weather', 'true').strip().lower() != 'false',
+        # A pick opens on the title's own page in its app (Watchmode's free plan: 2,500 requests a month).
+        'watchmodeKey': values.get('watchmode_key', '').strip(),
+        # The picks' posters with their ratings on them (RatingPosterDB; t0-free-rpdb is its free key).
+        'rpdbKey': values.get('rpdb_key', '').strip(),
+        # Trakt's Client ID only (the device flow with PKCE: no secret goes into the app).
+        'traktClientId': values.get('trakt_client_id', '').strip(),
+        # Nuvio=gh/Owner/Repo: a launcher that opens that TizenBrew module straight away (TizenBrew has to be installed).
+        'brewModules': [{'title': t.strip(), 'module': m.strip()} for t, _, m in
+                        (p.partition('=') for p in values.get('tizenbrew_modules', '').split(',') if '=' in p) if '/' in m],
+        'shelfOrder': 'recent' if values.get('shelf_order', '').strip().lower() == 'recent' else 'fixed',
+        # hdmi1:Xbox,hdmi2:Apple TV: those inputs always show at the top, by those names.
+        'inputNames': dict((k.strip().lower(), v.strip()) for k, _, v in
+                           (p.partition(':') for p in values.get('input_names', '').split(',') if ':' in p) if v.strip()),
+        'liveTvButton': values.get('live_tv_button', 'true').strip().lower() != 'false',
     }
+
+
+def choice(values, key, allowed, default):
+    v = values.get(key, '').strip().lower() or default
+    if v not in allowed:
+        sys.exit('config.properties: %s must be one of %s (got "%s")' % (key, ', '.join(allowed), v))
+    return v
 
 
 def coins():
@@ -132,3 +161,10 @@ def preview(app, out_dir):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, 'wb') as f:
             f.write(content)
+    # A Samsung TV's own apps (tizen/preview_apps.py), in place of the sample ones.
+    apps = os.path.join(ROOT, 'samsung-apps.local.json')
+    if os.path.exists(apps):
+        with open(apps, encoding='utf-8') as f:
+            listed = json.load(f)
+        with open(os.path.join(out_dir, 'config.js'), 'a', encoding='utf-8') as f:
+            f.write('\nwindow.PREVIEW_APPS = %s;\n' % json.dumps(listed, ensure_ascii=False))

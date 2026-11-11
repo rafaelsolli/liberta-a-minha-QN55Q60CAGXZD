@@ -200,6 +200,52 @@ var TV = (function () {
     plex: 'icons/plex.svg', appletv: 'icons/appletv.svg'
   };
 
+  // The shelf's glyphs (web/icons/glyph-*.png: white marks with alpha, drawn as masks in the theme's color) and the
+  // brand color each takes when focused ('' keeps the theme's), by the ids a 2023 Q60C (Tizen 9) lists. Simple Icons'
+  // (CC0) where it has the brand; Prime Video, Disney+, Globoplay, HBO Max and Xbox lifted off their phone icons.
+  var GLYPHS = {
+    '9Ur5IzDKqV.TizenYouTube': ['youtube', '#FF0033'],
+    'org.tizen.primevideo': ['primesmile', '#1A98FF'],   // Amazon's smile alone
+    'evKhCgZelL.AmazonIgnitionLauncher2': ['primesmile', '#1A98FF'],
+    '5b8c3eb16b.BeamCTVDev': ['hbomax', '#9B4DFF'],
+    'MCmYXNxgcu.DisneyPlus': ['disney', '#2F6BFF'],   // Disney's D alone
+    'org.tizen.globoplayapp': ['globo', '#FF3B3B'],   // Globo's symbol (Wikimedia Commons' Rede_Globo_logo.svg)
+    'OGLLvqej7u.CrunchyrollWebApp': ['crunchyroll', '#F47521'],
+    'IkWsFHtOY9.Stremio': ['stremio', '#8A6CF0'],
+    'w330sd5q6t.dtvlatam': ['sky', '#E8202A'],
+    'GHI3a0zMSx.XboxGamePass': ['xbox', '#2DB52D'],
+    'org.tizen.netflix': ['netflix', '#E50914'],
+    'org.tizen.netflix-app': ['netflix', '#E50914'],
+    'RN1MCdNq8t.Netflix': ['netflix', '#E50914'],
+    'com.samsung.tv.aria': ['apple', '#A2AAAD'],   // Apple's apple; its silver: the brand has no color of its own
+    'com.samsung.tv.aria-video': ['apple', '#A2AAAD'],
+    'rJeHak5zRg.Spotify': ['spotify', '#1ED760'],
+    // The rest of the Q60C's apps: SmartThings from Simple Icons, Alexa off its phone icon, and Material Symbols'
+    // (Apache 2.0, as app/assets/symbols) for Samsung's own and the ones with no mark of their own.
+    'com.samsung.tv.SmartThingsApp': ['smartthings', '#15BFFF'],
+    'AQKO41xyKP.AmazonAlexa': ['alexa', '#1AA9E6'],
+    'org.tizen.browser': ['browser', '#7882FF'],   // Samsung Internet's
+    'com.samsung.tv.gallery': ['gallery', ''],
+    'yoJJUiOgq9.laCollection': ['lacollection', ''],
+    'com.samsung.tv.SecurityCenter': ['security', ''],
+    'WSRedi0001.WorkspaceRedi': ['workspace', ''],
+    '25emanual3.emanual': ['userguide', ''],
+    'xvvl3S1bvH.TizenBrewStandalone': ['tizenbrew', ''],
+    // tizenbrew_modules' launchers, by their title (brewApps): Nuvio's play mark, off its module's icon
+    'nuvio.brew': ['nuvio', '#8B5CF6'],
+    'NuvioTV001.NuvioTV': ['nuvio', '#8B5CF6']   // Nuvio's own Tizen package (NuvioTVSmart's releases)
+  };
+
+  // The glyphs drawn from vectors (sharp at any size, the posters' small marks too); the rest are PNGs.
+  var SVG_GLYPHS = /^(apple|browser|crunchyroll|disney|gallery|globo|lacollection|netflix|primesmile|search|security|sky|smartthings|spotify|stremio|tizenbrew|userguide|workspace|youtube)$/;
+
+  function glyphFile(name) { return 'icons/glyph-' + name + (SVG_GLYPHS.test(name) ? '.svg' : '.png'); }
+
+  function glyphOf(id) {
+    var g = GLYPHS[id];
+    return g ? {glyph: glyphFile(g[0]), tint: g[1]} : {glyph: '', tint: ''};
+  }
+
   // Names Smart Hub gets wrong: HBO's app has none (so it never reached the shelf), others are long or old.
   var SAMSUNG_TITLES = {
     'NvZ26VG9Yw.HBOGOLAG': 'Max',
@@ -280,6 +326,7 @@ var TV = (function () {
         // The built-in Netflix stays only when the store's Netflix isn't installed.
         var store = out.some(function (x) { return /\.Netflix$/.test(x.id); });
         if (store) out = out.filter(function (x) { return x.id.indexOf('org.tizen.netflix') !== 0; });
+        out = out.concat(brewApps(list));
         // Smart Hub keeps its own order, which isn't readable: the same alphabetical order as All Apps elsewhere.
         out.sort(function (x, y) { var a = x.title.toLowerCase(), b = y.title.toLowerCase(); return a < b ? -1 : a > b ? 1 : 0; });
         done(out);
@@ -300,7 +347,8 @@ var TV = (function () {
     if (SAMSUNG_ICONS[a.id] || byName) icon = SAMSUNG_ICONS[a.id] || byName;
     var dial = key === 'netflix' ? 'Netflix' : key === 'youtube' ? 'YouTube' : /^(amazon)?primevideo$/.test(key) ? 'Amazon' : '';
     if (dial) samsungDial[a.id] = dial;
-    return {id: a.id, title: title, icon: icon, color: ''};
+    var g = glyphOf(a.id);
+    return {id: a.id, title: title, icon: icon, color: '', glyph: g.glyph, tint: g.tint};
   }
 
   /**
@@ -339,7 +387,54 @@ var TV = (function () {
     x.send('');
   }
 
+  // TizenBrew opens one of its modules straight away when another app hands it {moduleName, moduleType} in its app
+  // control's first data value (TizenBrew's WebSocketClient.onOpen): tizenbrew_modules makes those launchers apps here.
+  var TIZENBREW = /TizenBrew/i;
+
+  /** tizenbrew_modules' launchers ({id: 'tizenbrew:gh/Owner/Repo', title}), when TizenBrew is among the TV's apps. */
+  function brewApps(list) {
+    var brew = '';
+    for (var i = 0; i < list.length; i++) if (TIZENBREW.test(list[i].id)) brew = list[i].id;
+    if (!brew && samsung) return [];
+    return ((window.CONFIG || {}).brewModules || []).map(function (m) {
+      var g = glyphOf(m.title.toLowerCase().replace(/[^a-z0-9]/g, '') + '.brew');
+      brewHost['tizenbrew:' + m.module] = brew;
+      return {id: 'tizenbrew:' + m.module, title: m.title, icon: '', color: '', glyph: g.glyph, tint: g.tint};
+    });
+  }
+  var brewHost = {};
+
+  function brewLaunch(id, done) {
+    var module = id.slice('tizenbrew:'.length), slash = module.indexOf('/');
+    var ask = JSON.stringify({moduleType: module.slice(0, slash), moduleName: module.slice(slash + 1)});
+    try {
+      var control = new window.tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view', null, null, null,
+          [new window.tizen.ApplicationControlData('module', [ask])]);
+      window.tizen.application.launchAppControl(control, brewHost[id], function () { if (done) done(true); },
+          function () { if (done) done(false); });
+    } catch (e) {
+      if (done) done(false);
+    }
+  }
+
+  /**
+   * The app opened on a title's page (Watchmode's web address of it): Samsung's apps take a deep link as the app
+   * control's URI or as {"values": ...} under PAYLOAD (Smart Hub's own shortcuts), so both go; an app that reads neither
+   * opens at home as before, and one that refuses the request is opened plainly.
+   */
+  function samsungDeepLink(id, link, done) {
+    try {
+      var control = new window.tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view', link, null, null,
+          [new window.tizen.ApplicationControlData('PAYLOAD', [JSON.stringify({values: link})])]);
+      window.tizen.application.launchAppControl(control, id, function () { if (done) done(true); },
+          function () { samsungLaunch(id, done); });
+    } catch (e) {
+      samsungLaunch(id, done);
+    }
+  }
+
   function samsungLaunch(id, done) {
+    if (id.indexOf('tizenbrew:') === 0) { brewLaunch(id, done); return; }
     var dial = samsungDial[id];
     function launch(otherwise) {
       try {
@@ -518,11 +613,39 @@ var TV = (function () {
      */
     canOpenSettings: !tizen2 && !tizen34,
 
+    /** A brand's glyph (web/icons/glyph-*.png) by its name ("Xbox"), for an input named in input_names; '' if none. */
+    /** That glyph's brand color, '' for the theme's. */
+    tintNamed: function (name) {
+      var key = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (var id in GLYPHS) {
+        if (Object.prototype.hasOwnProperty.call(GLYPHS, id) && GLYPHS[id][0] === key) return GLYPHS[id][1];
+      }
+      return '';
+    },
+
+    glyphNamed: function (name) {
+      var key = String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (var id in GLYPHS) {
+        if (Object.prototype.hasOwnProperty.call(GLYPHS, id) && GLYPHS[id][0] === key) return glyphFile(key);
+      }
+      return '';
+    },
+
     /** Installed apps, as the TV's launcher lists them: [{id, title, icon, color}]. */
     apps: function (done) {
       if (samsung) { samsungApps(done); return; }
       if (!webos) {
-        done(SAMPLE.map(function (s) { return {id: s[0], title: s[1], icon: '', color: s[2]}; }));
+        // A Samsung TV's own apps when tizen/preview_apps.py read them, else the samples; with the logos the TVs get
+        // from web/icons, so the preview's shelf looks like theirs.
+        var listed = window.PREVIEW_APPS || SAMPLE;
+        var shown = listed.map(function (s) {
+          var key = s[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+          var logo = SAMSUNG_ICONS[s[0]] ||
+              (Object.prototype.hasOwnProperty.call(SAMSUNG_ICON_NAMES, key) ? SAMSUNG_ICON_NAMES[key] : '');
+          var g = glyphOf(s[0]);
+          return {id: s[0], title: SAMSUNG_TITLES[s[0]] || s[1], icon: logo, color: s[2] || '', glyph: g.glyph, tint: g.tint};
+        });
+        done(shown.concat(brewApps(shown)));
         return;
       }
       function list(res) {
@@ -564,6 +687,7 @@ var TV = (function () {
     launch: function (id, params, done) {
       if (samsung) {
         if (id.indexOf('source:') === 0) samsungSource(id, done);
+        else if (params && params.link) samsungDeepLink(id, params.link, done);
         else samsungLaunch(id, done);
         return;
       }

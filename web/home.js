@@ -64,6 +64,12 @@
   function fit() {
     var s = TV.name !== 'browser' ? window.innerWidth / 1920 : Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
     stage.style.webkitTransform = stage.style.transform = s === 1 ? '' : 'scale(' + s + ')';
+    // The browser preview: a window that isn't 16:9 shows the stage centered, with black bars, as a TV shows a film.
+    if (TV.name === 'browser') {
+      stage.style.left = Math.round((window.innerWidth - 1920 * s) / 2) + 'px';
+      stage.style.top = Math.round((window.innerHeight - 1080 * s) / 2) + 'px';
+      document.documentElement.style.background = body.style.background = '#000';
+    }
   }
 
   // MARK: - Apps on the shelf
@@ -86,7 +92,7 @@
   ];
   // Apps shown at once, as on Android: 8 (today's smallest tiles, 178 wide); the shelf scrolls for the rest. The
   // built-in list keeps 8 too.
-  var SHELF_VISIBLE = 8, FEW_APPS = 8;
+  var SHELF_VISIBLE = 11, FEW_APPS = 8;
 
   function shelfKey(app) {
     for (var i = 0; i < SHELF.length; i++) if (SHELF[i][1].test(app.id) || SHELF[i][2].test(app.title)) return SHELF[i];
@@ -342,45 +348,100 @@
     }
   }
 
+  /** A shelf tile's face: the app's glyph in the theme's color (its brand's when focused), else its name. */
+  function glyphFace(app, box, size, initial) {
+    if (app.symbol) { sym(app.symbol, box).className = 'sym glyph plain symbol'; return; }
+    if (!app.glyph && app.icon) { liftedGlyph(app, box, size, initial); return; }
+    if (!app.glyph) {
+      wordFace(app, box, size, initial);
+      return;
+    }
+    var layers = app.tint ? ['glyph plain tinted', 'glyph tint'] : ['glyph plain'];
+    for (var i = 0; i < layers.length; i++) {
+      var g = el('div', layers[i], box);
+      g.style.webkitMaskImage = g.style.maskImage = 'url(' + app.glyph + ')';
+      if (i) g.style.backgroundColor = app.tint;
+    }
+  }
+
+  /**
+   * An app with no glyph of ours: the logo lifted off the TV's icon (lift: its background taken away) as the mask, so
+   * it takes the theme's color like the rest; its name until then, and where the icon can't be read or isn't a logo.
+   */
+  /** The name in the tile, or (initial: All Apps, where the name is under it) only its first letter, large. */
+  function wordFace(app, box, size, initial) {
+    var word = el('div', 'word' + (initial ? ' initial' : ''), box, initial ? String(app.title).charAt(0).toUpperCase() : app.title);
+    if (!initial) word.style.fontSize = wordFit(app.title, size, 24) + 'px';
+    return word;
+  }
+
+  function liftedGlyph(app, box, size, initial) {
+    var word = wordFace(app, box, size, initial), url = app.icon;
+    function show(logo) {
+      if (!logo) return;
+      word.style.display = 'none';
+      var g = el('div', 'glyph plain', box);
+      g.style.webkitMaskImage = g.style.maskImage = 'url(' + logo.src + ')';
+    }
+    if (lifted[url] !== undefined) { show(lifted[url]); return; }
+    var img = new Image();
+    img.onload = function () {
+      if (lifted[url] === undefined) lifted[url] = lift(img);
+      show(lifted[url]);
+    };
+    img.src = url;
+  }
+
   var apps = [], shelf = [], others = [], inputs = [];
 
   /** shelf_apps in config.properties: the shelf in that order, by id or name (part of it). */
   var WANTED = (CONFIG.shelfApps || []).map(function (s) { return s.toLowerCase(); });
 
   function pickShelf() {
-    if (WANTED.length && Prefs.shelfConfig() !== WANTED.join(',')) {
-      Prefs.set('shelf', null);
-      Prefs.set('shelfConfig', WANTED.join(','));
+    // One shelf holds everything: the apps, Live TV and the inputs (the named ones always, the others when something is
+    // plugged in), alphabetically, running on to the right from the picks' left edge; with shelf_order=recent, what was
+    // opened last from here comes first. shelf_apps and the shelf editor don't order it.
+    var out = apps.concat(inputItems()).sort(function (a, b) {
+      var x = a.title.toLowerCase(), y = b.title.toLowerCase();
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+    if (CONFIG.shelfOrder === 'recent') {
+      var used = recentUse(), given = out.slice();
+      out.sort(function (a, b) { return (used[b.id] || 0) - (used[a.id] || 0) || given.indexOf(a) - given.indexOf(b); });
     }
-    var chosen = Prefs.shelf(), out = [];
-    if (chosen) {
-      for (var i = 0; i < chosen.length; i++) {
-        for (var j = 0; j < apps.length; j++) if (apps[j].id === chosen[i]) out.push(apps[j]);
-      }
-    } else if (WANTED.length) {
-      for (var w = 0; w < WANTED.length; w++) {
-        for (var k = 0; k < apps.length; k++) {
-          var id = apps[k].id.toLowerCase(), title = apps[k].title.toLowerCase();
-          if ((id.indexOf(WANTED[w]) >= 0 || title.indexOf(WANTED[w]) >= 0) && out.indexOf(apps[k]) < 0) { out.push(apps[k]); break; }
-        }
-      }
-      if (!out.length) out = apps.slice(0, FEW_APPS);
-    } else {
-      for (var s = 0; s < SHELF.length && out.length < FEW_APPS; s++) {
-        for (var a = 0; a < apps.length; a++) {
-          if ((SHELF[s][1].test(apps[a].id) || SHELF[s][2].test(apps[a].title)) && out.indexOf(apps[a]) < 0) { out.push(apps[a]); break; }
-        }
-      }
-      if (!out.length) out = apps.slice(0, FEW_APPS);
-    }
+    others = [];
     shelf = out;
-    others = apps.filter(function (x) { return shelf.indexOf(x) < 0; });
+  }
+
+  /** Live TV and the inputs as shelf items: a symbol (a TV, an HDMI plug), or the brand's glyph for a named input. */
+  function inputItems() {
+    var out = [], named = CONFIG.inputNames || {}, live = Prefs.liveInput() && liveTV();
+    if (live) out.push({id: live.id, title: tr('Live TV'), symbol: 'tv', input: true});
+    for (var i = 0; i < inputs.length; i++) {
+      var x = inputs[i], name = named[x.key];
+      if (x.key === 'live' || !(name || x.connected)) continue;
+      var glyph = name ? TV.glyphNamed(name) : '';
+      out.push(glyph ? {id: x.id, title: name, glyph: glyph, tint: TV.tintNamed(name), input: true}
+                     : {id: x.id, title: name || x.label, symbol: x.symbol, input: true});
+    }
+    return out;
+  }
+
+  /** When each app was last opened from here, {id: ms}: kept apart from the settings, so settings_on_tv=false leaves it. */
+  function recentUse() {
+    try { return JSON.parse(localStorage.getItem('fmtv.recent')) || {}; } catch (e) { return {}; }
+  }
+
+  function noteUse(id) {
+    var used = recentUse();
+    used[id] = Date.now();
+    try { localStorage.setItem('fmtv.recent', JSON.stringify(used)); } catch (e) {}
   }
 
   // MARK: - Focus
 
-  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about'};
-  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, city: 0, key: 0};
+  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about', SEARCH: 'search', SUB: 'sub', GENRE: 'genre', ACT: 'act', SPIDER: 'spider'};
+  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, city: 0, key: 0, sub: 0, genre: 0, act: 0};
   var cards = [];
 
   function sheetOpen() { return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG || st.zone === Z.CITY || st.zone === Z.KEY || st.zone === Z.ABOUT; }
@@ -389,24 +450,56 @@
     var i, list;
     list = $('tabs').children;
     for (i = 0; i < list.length; i++) {
-      setClass(list[i], 'on', i === st.tab);
+      setClass(list[i], 'on', i === st.tab && !searchMode);
       setClass(list[i], 'focus', st.zone === Z.TOP && st.top === i);
     }
     list = $('buttons').children;
-    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.TOP && st.top === 3 + i);
-    setClass($('quotes'), 'hide', st.zone === Z.TOP && st.top >= 3);
+    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.TOP && st.top === tabsN() + i);
+    setClass($('quotes'), 'hide', st.zone === Z.TOP && st.top >= tabsN());
+    setClass($('searchbar'), 'focus', st.zone === Z.SEARCH);
+    setClass(body, 'searchfocus', st.zone === Z.SEARCH && searchOpen);   // the magnifier dark on the white field
+    list = $('subtabs') ? $('subtabs').children : [];
+    for (i = 0; i < list.length; i++) {
+      setClass(list[i], 'on', i === (st.sub || 0) && !searchMode);
+      setClass(list[i], 'focus', st.zone === Z.SUB && st.sub === i);
+    }
+    list = $('genres') ? $('genres').children : [];
+    for (i = 0; i < list.length; i++) {
+      setClass(list[i], 'on', i === (st.genre || 0) && !searchMode);
+      setClass(list[i], 'focus', st.zone === Z.GENRE && st.genre === i);
+    }
     layoutCards();
     list = $('cards').children;
-    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.CARDS && st.card === i);
+    for (i = 0; i < list.length; i++) {
+      setClass(list[i], 'focus', st.zone === Z.CARDS && st.card === i);
+      setClass(list[i], 'acting', st.zone === Z.ACT && st.card === i);   // its buttons focused: its name and line stay
+    }
+    if (st.zone === Z.CARDS && cards[st.card] && cards[st.card].more) startMore();   // reaching the arrow loads more
+    renderActions();
+    if (st.zone === Z.SPIDER && !spiderShown()) st.zone = cards.length ? Z.CARDS : Z.SHELF;
+    setClass($('empty'), 'focus', st.zone === Z.SPIDER);
+    // The search field shrinks back into the magnifier when the focus leaves it (its results stay).
+    if (searchOpen && st.zone !== Z.SEARCH) {
+      searchOpen = false;
+      closeField('searchbar');
+      // It closes as it was, white and solid (and the magnifier dark on it) until it's gone: retracts, then shrinks.
+      var bar = $('searchbar');
+      setClass(bar, 'closing', true);
+      setClass(body, 'searchclosing', true);
+      clearTimeout(searchCloseTimer);
+      searchCloseTimer = setTimeout(function () { setClass(bar, 'closing', false); setClass(body, 'searchclosing', false); }, 560);
+      renderSearchBar();
+    }
     list = $('tiles').children;
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.SHELF && st.shelf === i);
     revealShelf();
-    list = document.querySelectorAll('#drawer .key');
+    list = document.querySelectorAll('#drawer .dcell');
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.DRAWER && st.drawer === i);
+    scrollDrawer();
     list = document.querySelectorAll('#apps .cell');
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.APPS && st.grid === i);
-    var rows = Math.max(1, Math.ceil(others.length / 5)), r = Math.floor(st.grid / 5), first = Math.max(0, Math.min(rows - 3, r - 1));
-    $('apps').lastChild.style.webkitTransform = $('apps').lastChild.style.transform = 'translateY(' + (-first * 239) + 'px)';
+    var rows = Math.max(1, Math.ceil(apps.length / APP_COLS)), r = Math.floor(st.grid / APP_COLS), first = Math.max(0, Math.min(rows - 3, r - 1));
+    $('apps').lastChild.style.webkitTransform = $('apps').lastChild.style.transform = 'translateY(' + (-first * APP_ROW) + 'px)';
     focusRows($('settings'), st.row, st.zone === Z.SETTINGS);
     focusRows($('shelfedit'), st.edit, st.zone === Z.EDIT);
     focusRows($('langpick'), st.lang, st.zone === Z.LANG);
@@ -445,26 +538,131 @@
 
   var TAB_KIND = [null, 'movie', 'tv'];
 
+  /** How many tabs: 4 with Trakt (Explore, For You, Continue Watching, Watchlist), else 3. The round buttons follow. */
+  // With Trakt: the favorites (a house, no name), Trakt's four, then the deleted (a bin). Data's tab for each.
+  var TRAKT_TABS = ['fav', 0, 1, 2, 3, 'trash'];
+  function tabsN() { return Trakt.signedIn() ? TRAKT_TABS.length : 3; }
+  function dataTab() { return Trakt.signedIn() ? TRAKT_TABS[st.tab] : st.tab; }
+  /** Where every entry lands: Explore (Trakt's, or the first tab without it). */
+  function startTab() { return Trakt.signedIn() ? 1 : 0; }
+
+  // With Trakt, each tab has sub-tabs under it: All, Movies, Shows (st.sub). Without, the tabs are the kinds already.
+  var SUB_KIND = [null, 'movie', 'tv'];
+  function hasSubs() { return Trakt.signedIn() && Data.hasKey(); }
+
   function renderTop() {
     $('title').textContent = tr('For You');
     var tabs = $('tabs');
     tabs.innerHTML = '';
-    var names = [tr('Explore'), tr('Movies'), tr('Shows')];
-    for (var i = 0; i < 3; i++) {
-      var t = el('button', 'tab', tabs, names[i]);
+    renderSubs();
+    // Signed in to Trakt: the account's tabs (Data.tabPicks) in place of the kinds.
+    var names = Trakt.signedIn() ? ['icon:home', tr('Explore'), tr('tab|Discover'), tr('tab|Continue'), tr('tab|Watchlist'), 'icon:trash']
+        : [tr('Explore'), tr('Movies'), tr('Shows')];
+    for (var i = 0; i < names.length; i++) {
+      var icon = names[i].indexOf('icon:') === 0, t = el('button', 'tab' + (icon ? ' icon' : ''), tabs, icon ? '' : names[i]);
+      if (icon) { var mk = el('span', 'mark', t); mk.style.webkitMaskImage = mk.style.maskImage = 'url(icons/glyph-' + names[i].slice(5) + '.svg)'; }
       hover(t, Z.TOP, i);
     }
     var buttons = $('buttons');
     buttons.innerHTML = '';
-    var own = Prefs.boxInput() !== 'live';
-    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['hdmi', tr('HDMI Inputs')], ['settings', tr('light|Settings')]];
-    for (var b = 0; b < 3; b++) {
-      var r = el('button', 'round' + (b === 2 ? ' last' : ''), buttons);
-      r.style.left = (1596 + 88 * b) + 'px';
-      sym(defs[b][0], r);
-      el('div', 'tip', r, defs[b][1]);
-      hover(r, Z.TOP, 3 + b);
+    // Live TV and the inputs are on the shelf (inputItems): only the gear can be here (Home Settings, whose last row
+    // opens TV Settings), and only without settings_on_tv=false, where config.properties holds them all.
+    topItems = [['apps', tr('Search'), openSearch, 'icons/glyph-search.svg', 'bare']];   // no disc; focus opens it
+    if (CONFIG.settingsOnTv !== false) topItems.push(['settings', tr('light|Settings'), openSettings]);
+    for (var b = 0; b < topItems.length; b++) {
+      var r = el('button', 'round' + (b === topItems.length - 1 ? ' last' : '') + (topItems[b][4] ? ' ' + topItems[b][4] : ''), buttons);
+      r.style.left = (1772 - 88 * (topItems.length - 1 - b)) + 'px';
+      var mark = sym(topItems[b][0], r);
+      if (topItems[b][3]) mark.style.webkitMaskImage = mark.style.maskImage = 'url(' + topItems[b][3] + ')';
+      el('div', 'tip', r, topItems[b][1]);
+      hover(r, Z.TOP, tabsN() + b);
     }
+    if (st.top > tabsN() - 1 + topItems.length) st.top = tabsN() - 1 + topItems.length;
+    alignRows();
+    // Trakt not signed in yet: the code to type at trakt.tv/activate, at the top right (Trakt.signIn makes it).
+    var tk = Trakt.state, hint = tk.code ? 'Trakt · ' + trf('{url}, code {code}', {url: tk.url, code: tk.code}) : tk.message;
+    if (hint && !Trakt.signedIn() && !searchOpen) el('div', 'trakthint', buttons, hint);
+    renderSearchBar();
+  }
+
+  var topItems = [];
+
+  // MARK: - Search: the magnifier opens a field at the top right (the TV's keyboard comes up); OK or Done searches
+  // TMDB (Data.search), and the results take the picks' row, with the same marks and the same ways to open. Back,
+  // or picking a tab, goes back to the tabs' picks.
+
+  var searchCloseTimer = 0, searchOpen = false, searchMode = false, searchResults = [], searchText = '', searchStatus = '', searchSeq = 0;
+
+  /**
+   * Made once, beside the buttons (renderTop rebuilds those): opening it is an animation, a disc growing out of the
+   * magnifier that then stretches left into the field (CSS: only transforms and opacity, as everywhere here).
+   */
+  function renderSearchBar() {
+    var bar = $('searchbar');
+    if (!bar) {
+      bar = el('div', 'searchbar', $('buttons').parentNode);
+      bar.id = 'searchbar';
+      var fill = el('div', 'fill', bar), field = el('input', '', fill);
+      field.type = 'text';
+      field.setAttribute('aria-label', tr('Search'));
+      field.setAttribute('autocomplete', 'off');
+      field.setAttribute('spellcheck', 'false');
+      field.oninput = function () { searchText = field.value; };
+      hover(bar, Z.SEARCH, 0);
+    }
+    var input = bar.querySelector('input');
+    if (input.value !== searchText) input.value = searchText;
+    input.placeholder = searchStatus || tr('Search');
+    setClass(bar, 'open', searchOpen);
+    setClass(body, 'searching', searchOpen);
+  }
+
+  function openSearch() {
+    clearTimeout(searchCloseTimer);
+    setClass($('searchbar'), 'closing', false);
+    setClass(body, 'searchclosing', false);
+    searchOpen = true;
+    renderTop();
+    st.zone = Z.SEARCH;
+    updateFocus();
+    // The keyboard once the field has grown out of the magnifier (renderSearchBar's animation takes 0.48 s).
+    setTimeout(function () { if (searchOpen && st.zone === Z.SEARCH) openField('searchbar'); }, 480);
+  }
+
+  function closeSearch() {
+    closeField('searchbar');
+    var was = searchMode;
+    searchOpen = false;
+    searchMode = false;
+    searchStatus = '';
+    searchSeq++;
+    renderTop();
+    st.zone = Z.TOP;
+    st.top = tabsN();   // back on the magnifier
+    if (was) { cards = []; renderCards(); }
+    updateFocus();
+  }
+
+  function runSearch() {
+    var q = searchText.trim();
+    closeField('searchbar');
+    if (!q) { openField('searchbar'); return; }
+    var seq = ++searchSeq;
+    searchMode = true;
+    searchResults = [];
+    searchStatus = tr('Searching…');
+    renderTop();
+    cards = [];
+    renderCards();
+    Data.search(q, function (err, list, finished) {
+      if (seq !== searchSeq) return;   // a newer search, or closed
+      searchResults = list;
+      searchStatus = err ? trf("Couldn't search now: {error}", {error: err.message}) : finished && !list.length ? tr('Nothing') : '';
+      if (finished || err) renderTop();
+      renderCards();
+      if (list.length && st.zone === Z.SEARCH) { st.zone = Z.CARDS; st.card = 0; }
+      updateFocus();
+    });
   }
 
   function renderQuotes() {
@@ -480,30 +678,47 @@
   // MARK: - Picks and background
 
   function renderCards() {
-    var list = Data.picks(TAB_KIND[st.tab]);
+    var list = searchMode ? searchResults : Data.tabPicks(dataTab(), Trakt.signedIn() ? SUB_KIND[st.sub || 0] : TAB_KIND[st.tab], st.genre || 0);
+    // More of the tab on Trakt than it shows: an arrow ends the row, and OK on it brings 20 more (Data.more).
+    if (!searchMode && Data.hasMore(dataTab())) list = list.concat([{id: 'more', kind: '', title: '', backdrop: '', meta: '', more: true}]);
     var holder = $('cards');
     setClass(body, 'no-picks', !list.length);
+    renderEmpty(!list.length && !searchMode);
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
-    if (!Data.hasKey() && st.zone === Z.TOP && st.top < 3) st.top = 3;
+    if (!Data.hasKey() && st.zone === Z.TOP && st.top < tabsN()) st.top = tabsN();
     var same = list.length === cards.length;
     for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta;
     if (same && holder.children.length === list.length) return;
     cards = list;
+    loadingMore = false;
     holder.innerHTML = '';
     for (var c = 0; c < list.length; c++) {
-      var p = list[c], card = el('div', 'card', holder);
+      var p = list[c], card = el('div', 'card' + (p.more ? ' loadmore' : ''), holder);
+      // The row's end on Trakt: the shelf's small arrow; reaching it loads 20 more (startMore), dots meanwhile.
+      if (p.more) {
+        sym('chevron_right', card);
+        var dots = el('div', 'dots', card);   // while more come: three dots, each hopping in turn
+        for (var d = 0; d < 3; d++) el('span', '', dots);
+        hover(card, Z.CARDS, c);
+        continue;
+      }
       var img = el('div', 'img', card);
       // Narrow: the poster (the backdrop cropped without one); the wide card fades its backdrop in over it, loaded then.
       var poster = el('div', 'layer', img);
-      poster.style.backgroundImage = 'url(' + (p.poster ? Data.image(p.poster, 'w342') : Data.image(p.backdrop, 'w780')) + ')';
+      var art = Data.poster(p, 'w342');
+      poster.style.backgroundImage = 'url(' + (art || Data.image(p.backdrop, 'w780')) + ')';
+      // RPDB's ratings are a strip along the poster's bottom: the card keeps that edge where it crops.
+      if (CONFIG.rpdbKey && p.imdb) poster.style.backgroundPosition = '50% 100%';
       el('div', 'layer back', img);
+      badge(p, img);
       el('div', 'name', card, p.title);
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
     }
     st.card = Math.min(st.card, Math.max(0, list.length - 1));
     if (!list.length && st.zone === Z.CARDS) st.zone = Z.SHELF;
-    backdrop(list.length ? Data.image(list[st.card].backdrop, 'w300') : '');
+    if (list.length && !list[st.card].more) backdrop(Data.image(list[st.card].backdrop, 'w300'));
+    else if (!list.length) backdrop('');
     updateFocus();
   }
 
@@ -513,9 +728,13 @@
    * transform and the backdrop's opacity animate: the widths change at once (older TVs).
    */
   function layoutCards() {
-    var holder = $('cards'), nodes = holder.children, left = 80, scroll = Math.max(0, st.card - 2) * 360;
+    // Posters only, as many as a tab has: the row slides to keep the focused one among the first four on screen.
+    // At the row's end it stops where the last poster meets the right edge, not leaving a gap after it.
+    var holder = $('cards'), nodes = holder.children, left = 80, step = POSTER_W + 32;
+    var arrow = cards.length && cards[cards.length - 1].more ? POSTER_W - ARROW_W : 0;
+    var end = Math.max(0, nodes.length * step - arrow - 32 - 1760), scroll = Math.min(end, Math.max(0, st.card - 3) * step);
     for (var i = 0; i < nodes.length; i++) {
-      var wide = i === st.card, w = wide ? 1040 : 320, n = nodes[i], at = left - scroll;
+      var wide = false, w = cards[i] && cards[i].more ? ARROW_W : POSTER_W, n = nodes[i], at = left - scroll;
       n.style.left = left + 'px';
       n.style.width = w + 'px';
       setClass(n, 'wide', wide);
@@ -524,12 +743,158 @@
         n.setAttribute('data-back', '1');
         n.querySelector('.back').style.backgroundImage = 'url(' + Data.image(cards[i].backdrop, 'w1280') + ')';
       }
-      left += w + 40;
+      left += w + 32;
     }
     holder.style.webkitTransform = holder.style.transform = 'translateX(' + (-scroll) + 'px)';
   }
 
-  var bgUrl = null, bgFront = 'bgA';
+  // MARK: - An empty row: three hopping dots while the picks may still come, then the itsy bitsy spider and a line
+  // picked at random (a new one each time the row turns empty), where the posters would be.
+
+  var emptyWas = false, emptyLine = 0;
+
+  function emptyLines() {
+    return [tr('empty|Nothing here… just the itsy bitsy spider.'), tr('empty|So empty the itsy bitsy spider moved in.'),
+      tr('empty|Nothing to watch… but the itsy bitsy spider still wants popcorn.'), tr('empty|Did you come here just to watch the itsy bitsy spider?'),
+      tr('empty|Empty… even the itsy bitsy spider is bored.')];
+  }
+
+  var SPIDER = '<svg width="120" height="120" viewBox="0 0 120 120"><g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round">' +
+    '<path d="M52 64 Q36 48 24 28"/><path d="M50 70 Q30 62 12 56"/><path d="M50 76 Q30 82 14 94"/><path d="M53 82 Q40 96 32 112"/>' +
+    '<path d="M68 64 Q84 48 96 28"/><path d="M70 70 Q90 62 108 56"/><path d="M70 76 Q90 82 106 94"/><path d="M67 82 Q80 96 88 112"/></g>' +
+    '<ellipse cx="60" cy="76" rx="15" ry="18" fill="currentColor"/><circle cx="60" cy="53" r="10" fill="currentColor"/>' +
+    '<circle class="eye" cx="56" cy="51" r="2.6"/><circle class="eye" cx="64" cy="51" r="2.6"/></svg>';
+
+  function spiderShown() { var e = $('empty'); return !!e && /\bon\b/.test(e.className) && !/\bbusy\b/.test(e.className); }
+
+  /**
+   * The easter egg: the spider on a spring. Holding OK pulls it down its thread, slower as it nears the limit (the band
+   * resists); letting go, it springs back and bounces, a damped spring, harder the further it was pulled. A tap gives a
+   * small tug. Run frame by frame on the transform (as everything here animates); at rest, it swings again (CSS).
+   */
+  var SPRING_MAX = 84, SPRING_K = 95, SPRING_C = 3.6;
+  var spring = {y: 0, v: 0, holding: false, running: false, last: 0, timer: 0};
+  var nextFrame = window.requestAnimationFrame || window.webkitRequestAnimationFrame || function (f) { return setTimeout(function () { f(Date.now()); }, 16); };
+
+  function springFrame(t) {
+    var hang = document.querySelector('#empty .hang');
+    if (!hang || !spring.running) { spring.running = false; return; }
+    var dt = Math.min(0.05, Math.max(0, (t - spring.last) / 1000));
+    spring.last = t;
+    if (spring.holding) {
+      spring.y += (SPRING_MAX - spring.y) * Math.min(1, dt * 1.6);   // harder to pull the further it goes
+      spring.v = 0;
+    } else {
+      spring.v += (-SPRING_K * spring.y - SPRING_C * spring.v) * dt;
+      spring.y += spring.v * dt;
+    }
+    var r = -3 + Math.max(-5, Math.min(5, spring.v * 0.012));   // a little twist as it flies; -3° is where the swing starts
+    hang.style.webkitTransform = hang.style.transform = 'translateY(' + spring.y.toFixed(1) + 'px) rotate(' + r.toFixed(2) + 'deg)';
+    if (!spring.holding && Math.abs(spring.y) < 0.4 && Math.abs(spring.v) < 4) {
+      spring.running = false;
+      hang.style.webkitTransform = hang.style.transform = '';
+      setClass(hang, 'physics', false);   // at rest: the swing again
+      return;
+    }
+    nextFrame(springFrame);
+  }
+
+  /** OK down on the spider (again and again while held: the TV repeats the key). */
+  function springHold() {
+    var hang = document.querySelector('#empty .hang');
+    if (!hang) return;
+    clearTimeout(spring.timer);
+    spring.timer = setTimeout(springRelease, 700);   // a TV that sends no keyup: let go once the repeats stop
+    if (spring.holding) return;
+    spring.holding = true;
+    spring.y = Math.max(spring.y, 16);   // even a tap tugs it a little
+    if (!spring.running) {
+      spring.running = true;
+      setClass(hang, 'physics', true);
+      spring.last = (window.performance && performance.now) ? performance.now() : Date.now();
+      nextFrame(springFrame);
+    }
+  }
+
+  function springRelease() {
+    clearTimeout(spring.timer);
+    spring.holding = false;
+  }
+
+  function renderEmpty(empty) {
+    var e = $('empty');
+    if (!e) {
+      e = el('div', '', $('cards').parentNode);
+      e.id = 'empty';
+      // One piece swinging from a point above the clip: the thread (its top hidden) tied to the spider's head.
+      var hang = el('div', 'hang', el('div', 'clip', e));
+      el('div', 'thread', hang);
+      el('div', 'spider', hang).innerHTML = SPIDER;
+      el('div', 'line', e);
+      var dots = el('div', 'dots', e);
+      for (var d = 0; d < 3; d++) el('span', '', dots);
+    }
+    var busy = empty && Data.busy();
+    if (empty && !busy && !emptyWas) emptyLine = Math.floor(Math.random() * 5);   // a new line each time it turns empty
+    emptyWas = empty && !busy;
+    e.querySelector('.line').textContent = emptyLines()[emptyLine];
+    setClass(e, 'on', empty);
+    setClass(e, 'busy', busy);
+  }
+
+  var POSTER_W = 306, ARROW_W = 40, loadingMore = false;   // 2:3, as the posters, 460 high
+
+  /** At the row's last card, the arrow: 20 more of the tab (Data.more), the arrow hopping dots until they come. */
+  // MARK: - Favorite and delete: two buttons under the focused poster, left of its name and line (↓ from the poster
+  // goes through them before the shelf). In a Trakt tab: Favorite (Unfavorite once it is) and Delete; in the favorites:
+  // Unfavorite and Delete; in the bin: Favorite and Restore.
+
+  function actionsFor() {
+    var p = cards[st.card], t = searchMode ? null : dataTab();   // search results: as in a Trakt tab, whatever tab is under them
+    if (!Trakt.signedIn() || !p || p.more) return [];
+    if (t === 'trash') return [['fav', 'heart', tr('action|Favorite')], ['restore', 'restore', tr('action|Restore')]];
+    if (t === 'fav') return [['unfav', 'unheart', tr('action|Unfavorite')], ['trash', 'trash', tr('action|Delete')]];
+    return [Data.isFav(p) ? ['unfav', 'unheart', tr('action|Unfavorite')] : ['fav', 'heart', tr('action|Favorite')],
+      ['trash', 'trash', tr('action|Delete')]];
+  }
+
+  function renderActions() {
+    var old = $('actions');
+    if (old) { setClass(old.parentNode, 'withacts', false); old.parentNode.removeChild(old); }
+    var acts = (st.zone === Z.CARDS || st.zone === Z.ACT) ? actionsFor() : [], card = $('cards').children[st.card];
+    if (!acts.length || !card) { if (st.zone === Z.ACT) st.zone = Z.CARDS; return; }
+    // At the poster's left edge, under it; its name and line move right of them (.withacts).
+    var box = el('div', '', card);
+    box.id = 'actions';
+    setClass(card, 'withacts', true);
+    for (var i = 0; i < acts.length; i++) {
+      var b = el('div', 'act' + (st.zone === Z.ACT && st.act === i ? ' focus' : ''), box), m = el('span', 'mark', b);
+      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + acts[i][1] + '.svg)';
+      el('div', 'tip', b, acts[i][2]);
+      hover(b, Z.ACT, i);
+    }
+  }
+
+  /** The action on the focused title; where it leaves this tab, the next one takes the focus (on its poster). */
+  function doAction(what) {
+    var p = cards[st.card];
+    if (!p) return;
+    Data.mark(p, what);
+    cards = [];
+    renderCards();
+    if (!cards[st.card] || cards[st.card].id !== p.id) st.zone = Z.CARDS;
+    updateFocus();
+  }
+
+  function startMore() {
+    if (loadingMore) return;
+    loadingMore = true;
+    var nodes = $('cards').children;
+    if (nodes.length) setClass(nodes[nodes.length - 1], 'loading', true);
+    Data.more(dataTab());
+  }   // the cards' width: TMDB's and RPDB's posters are 2:3, the card 442 high
+
+  var bgUrl = null, bgFront = 'bgA', blurCanvas = null;
 
   /** The focused pick's photo as the background: drawn tiny and stretched, it's already as soft as a heavy blur. */
   function backdrop(url) {
@@ -544,8 +909,18 @@
     var img = new Image();
     img.onload = function () {
       if (bgUrl !== url) return;
-      var canvas = $(next), ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // A real blur, smooth at any stretch: the photo shrunk to 12 × 7, then drawn back up inside the canvas with its
+      // own smoothing, a soft gradient the TV can't show as blocks when it stretches the canvas to the screen.
+      var canvas = $(next), ctx = canvas.getContext('2d'), tiny = blurCanvas || (blurCanvas = document.createElement('canvas'));
+      tiny.width = 12;
+      tiny.height = 7;
+      var t = tiny.getContext('2d');
+      t.imageSmoothingEnabled = true;
+      t.drawImage(img, 0, 0, tiny.width, tiny.height);
+      ctx.imageSmoothingEnabled = true;
+      try { ctx.imageSmoothingQuality = 'high'; } catch (e) {}
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(tiny, 0, 0, canvas.width, canvas.height);
       setClass(canvas, 'on', true);
       setClass($(bgFront), 'on', false);
       bgFront = next;
@@ -554,13 +929,14 @@
   }
 
   // As HomeView's bgFollow: the background follows the focused pick.
-  var BG_FOLLOW_MS = 500, bgTimer = 0;
+  var BG_FOLLOW_MS = 250, bgTimer = 0;
 
   /** The focused pick's photo as the background once the focus has rested on it: a quick run along the row fades once. */
   function followSoon() {
     clearTimeout(bgTimer);
     bgTimer = setTimeout(function () {
-      if (cards.length) backdrop(Data.image(cards[Math.min(st.card, cards.length - 1)].backdrop, 'w300'));
+      var c = cards[Math.min(st.card, cards.length - 1)];
+      if (c && !c.more) backdrop(Data.image(c.backdrop, 'w300'));
     }, BG_FOLLOW_MS);
   }
 
@@ -581,15 +957,17 @@
   var shelfFirst = 0, tileStep = 0, tileLeft = 0;
 
   function renderShelf() {
-    var n = Math.min(shelf.length, SHELF_VISIBLE), gap = 48, pad = 40;
-    // 16:9 tiles, as on Android: never taller than 126, and the glass keeps its bottom edge.
-    var tw = Math.min(126 * 16 / 9, (1760 - Math.max(0, n - 1) * gap) / Math.max(1, n)), th = tw * 9 / 16;
-    var width = n * tw + Math.max(0, n - 1) * gap, left = (1920 - width) / 2;
+    var n = Math.min(shelf.length, SHELF_VISIBLE), gap = 40, pad = 40;
+    // Square tiles, as a phone's app icons: never taller than 120 (the name shows under the focused one, inside the
+    // glass), and the glass keeps its bottom edge.
+    var tw = Math.min(120, (1760 - Math.max(0, n - 1) * gap) / Math.max(1, n)), th = tw;
+    var width = n * tw + Math.max(0, n - 1) * gap, left = 80;   // the picks' left edge
     var platter = $('platter');
+    platter.className = 'bare';
     platter.style.display = n ? '' : 'none';
     platter.style.left = (left - pad) + 'px';
     platter.style.width = (width + 2 * pad) + 'px';
-    platter.style.top = (814 + 126 - th) + 'px';
+    platter.style.top = (854 + 126 - th) + 'px';   // 40 lower than the stock layout: the room under it
     platter.style.height = (th + 2 * pad) + 'px';
     $('quotes').style.right = (1920 - left - width) + 'px';
     var tiles = $('tiles');
@@ -599,10 +977,12 @@
     shelfFirst = Math.max(0, Math.min(shelfFirst, shelf.length - n));
     for (var i = 0; i < shelf.length; i++) {
       var t = el('div', 'tile', tiles);
-      t.style.top = (854 + 126 - th) + 'px';
+      t.style.top = (894 + 126 - th) + 'px';
       t.style.width = tw + 'px';
       t.style.height = th + 'px';
-      face(shelf[i], t, wordFit(shelf[i].title, tw, 30));
+      t.className = 'tile bare';
+      glyphFace(shelf[i], el('div', 'look', t), tw);
+      el('div', 'name', t, shelf[i].title);
       hover(t, Z.SHELF, i);
     }
     // More apps than fit: a small arrow inside the glass's edge on each side that has more, where no tile reaches
@@ -644,46 +1024,53 @@
 
   // MARK: - Drawer
 
-  var drawerItems = [], drawerInputs = 0;
+  // The drawer is All Apps: ↓ on the shelf (or its last tile, the arrow) slides the page up as the weather's did, the
+  // shelf stays at the top and every other app follows under it, in alphabetical order, as the shelf shows its own.
+  // The weather and prices panels are gone (NO_PANELS).
+  var drawerItems = [], drawerInputs = 0, NO_DRAWER = true, NO_PANELS = true;   // every app is on the shelf now
+  var DRAWER_COLS = 8, DRAWER_STEP = 210, DRAWER_ROW = 230, DRAWER_TOP = 556;
 
   function renderDrawer() {
     var d = $('drawer');
     d.innerHTML = '';
-    drawerItems = [];
-    for (var i = 0; i < inputs.length; i++) {
-      var x = inputs[i];
-      if (x.key === 'live' && !Prefs.liveInput()) continue;
-      drawerItems.push({label: x.label || tr('Live TV'), symbol: x.symbol, off: !x.connected, run: launcher(x.id, x.label)});
-    }
-    drawerInputs = drawerItems.length;
-    drawerItems.push({label: tr('All Apps'), symbol: 'apps', run: openApps});
-    drawerItems.push({label: tr('Home Settings'), symbol: 'settings', run: openSettings});
-    if (TV.canOpenSettings) drawerItems.push({label: tr('TV Settings'), symbol: 'tv_settings', run: tvSettings});
-    var n = drawerItems.length, gap = 18, groupGap = 56, groups = drawerInputs > 0 && drawerInputs < n ? 2 : 1;
-    var tw = Math.min(230, (1760 - Math.max(0, n - groups) * gap - (groups - 1) * groupGap) / Math.max(1, n));
-    var xPos = 80;
-    for (var k = 0; k < n; k++) {
-      if (k === drawerInputs && k > 0) {
-        xPos += groupGap - gap;
-        el('div', 'row-title', d, tr('Shortcuts')).style.left = (xPos + 4) + 'px';
-      }
-      if (k === 0 && drawerInputs) el('div', 'row-title', d, tr('Inputs')).style.left = '84px';
-      var item = drawerItems[k], key = el('div', 'key glass' + (item.off ? ' off' : ''), d);
-      key.style.left = xPos + 'px';
-      key.style.width = tw + 'px';
-      sym(item.symbol, key);
-      el('div', 'label', key, item.label);
-      hover(key, Z.DRAWER, k);
-      xPos += tw + gap;
+    drawerItems = others.slice().sort(function (a, b) {
+      var x = a.title.toLowerCase(), y = b.title.toLowerCase();
+      return x < y ? -1 : x > y ? 1 : 0;
+    }).map(function (app) { return {app: app, run: launcher(app.id, app.title)}; });
+    drawerInputs = 0;
+    if (drawerItems.length) el('div', 'row-title', d, tr('All Apps')).style.left = '84px';
+    // The rows scroll inside a window under the shelf, so the ones above the focus never slide over it.
+    var view = el('div', 'dview', d), grid = el('div', 'dgrid', view);
+    var left = (1920 - ((DRAWER_COLS - 1) * DRAWER_STEP + 120)) / 2;
+    for (var k = 0; k < drawerItems.length; k++) {
+      var app = drawerItems[k].app, cell = el('div', 'tile bare dcell', grid);
+      cell.style.left = (left + (k % DRAWER_COLS) * DRAWER_STEP) + 'px';
+      cell.style.top = (24 + Math.floor(k / DRAWER_COLS) * DRAWER_ROW) + 'px';
+      cell.style.width = cell.style.height = '120px';
+      glyphFace(app, el('div', 'look', cell), 120);
+      el('div', 'name', cell, app.title);
+      hover(cell, Z.DRAWER, k);
     }
     renderPanels();
     updateFocus();
+  }
+
+  /** The drawer's rows from the focused one's row: the one above it stays in view. */
+  function scrollDrawer() {
+    var grid = document.querySelector('#drawer .dgrid');
+    if (!grid) return;
+    var rows = Math.ceil(drawerItems.length / DRAWER_COLS), r = Math.floor(st.drawer / DRAWER_COLS);
+    var first = Math.max(0, Math.min(rows - 2, r - 1));
+    grid.style.webkitTransform = grid.style.transform = 'translateY(' + (-first * DRAWER_ROW) + 'px)';
   }
 
   function renderPanels() {
     var d = $('drawer');
     var old = d.querySelectorAll('.panel');
     for (var o = 0; o < old.length; o++) d.removeChild(old[o]);
+    // No second page: the drawer shows nothing and never opens (↓ on the shelf does nothing), so nor are its weather
+    // and prices drawn. The quotes in the tab row and the screensaver's weather stay.
+    if (NO_PANELS) return;
     var wx = Prefs.weather(), coins = Data.activeCoins(), qt = coins.length > 0;
     var split = 80 + 1760 * 0.585;
     if (wx) {
@@ -790,33 +1177,39 @@
   }
 
   function openDrawer() {
-    if (!drawerItems.length) return;
-    var tiles = $('tiles').children;
+    if (NO_DRAWER || !drawerItems.length) return;
+    var tiles = $('tiles').children, cells = document.querySelectorAll('#drawer .dcell'), row = [];
+    for (var i = 0; i < Math.min(DRAWER_COLS, cells.length); i++) row.push(cells[i]);
     st.zone = Z.DRAWER;
-    st.drawer = Math.min(drawerItems.length - 1, nearest(document.querySelectorAll('#drawer .key'), centerX(tiles[st.shelf])));
+    st.drawer = nearest(row, centerX(tiles[st.shelf]));   // the first row's app under the shelf's focus
     updateFocus();
   }
 
   function closeDrawer() {
-    var keys = document.querySelectorAll('#drawer .key');
+    var keys = document.querySelectorAll('#drawer .dcell');
     st.zone = Z.SHELF;
-    if (shelf.length) st.shelf = nearest($('tiles').children, centerX(keys[st.drawer]));
+    if (shelf.length && keys[st.drawer]) st.shelf = nearest($('tiles').children, centerX(keys[st.drawer]));
     updateFocus();
   }
 
   // MARK: - All Apps
+
+  // All Apps: every app (the shelf's too) as the shelf shows them, a glyph in the theme's color with its name under it,
+  // APP_COLS to a row.
+  var APP_COLS = 8, APP_STEP = 210, APP_ROW = 240;
 
   function renderApps() {
     var sheet = $('apps');
     sheet.firstChild.textContent = tr('All Apps');
     var grid = sheet.lastChild;
     grid.innerHTML = '';
-    for (var i = 0; i < others.length; i++) {
-      var r = Math.floor(i / 5), c = i % 5, cell = el('div', 'cell', grid);
-      cell.style.left = (130 + c * 340) + 'px';
-      cell.style.top = (196 + r * 239) + 'px';
-      face(others[i], el('div', 'face', cell), wordFit(others[i].title, 300, 34));
-      el('div', 'label', cell, others[i].title);
+    var left = (1920 - ((APP_COLS - 1) * APP_STEP + 130)) / 2;
+    for (var i = 0; i < apps.length; i++) {
+      var r = Math.floor(i / APP_COLS), c = i % APP_COLS, cell = el('div', 'cell glyphcell', grid);
+      cell.style.left = (left + c * APP_STEP) + 'px';
+      cell.style.top = (210 + r * APP_ROW) + 'px';
+      glyphFace(apps[i], el('div', 'look', cell), 130, true);
+      el('div', 'label', cell, apps[i].title);
       hover(cell, Z.APPS, i);
     }
   }
@@ -914,7 +1307,7 @@
     rows.push({label: tr('Live TV button'), value: boxLabel(),
       step: function (d) { cycle('boxInput', ['live', 'hdmi1', 'hdmi2', 'hdmi3', 'hdmi4'], Prefs.boxInput(), d); renderTop(); }});
     rows.push({label: tr('Live TV'), toggle: Prefs.liveInput(),
-      step: function () { Prefs.set('liveInput', !Prefs.liveInput()); renderDrawer(); }});
+      step: function () { Prefs.set('liveInput', !Prefs.liveInput()); pickShelf(); renderShelf(); }});
     rows.push({label: tr('Shelf'), value: '›', shelf: true, step: function (d) { if (d >= 0) openShelfEdit(); }});
     rows.push({label: tr('About this TV'), value: '›', about: true, step: function (d) { if (d >= 0) openAbout(); }});
     if (TV.canOpenSettings) rows.push({label: tr('TV Settings'), value: '›', step: function (d) { if (d >= 0) tvSettings(); }});
@@ -1036,7 +1429,9 @@
   function openField(sheet) {
     var f = fieldOf(sheet);
     if (!f) return;
-    f.focus();
+    // Without scrolling: the search bar clips its field, and a focus that scrolls it would undo its animation.
+    try { f.focus({preventScroll: true}); } catch (e) { f.focus(); }
+    $(sheet).scrollLeft = 0;
     try { f.setSelectionRange(f.value.length, f.value.length); } catch (e) {}
   }
 
@@ -1300,7 +1695,7 @@
   // MARK: - Shelf editor: which apps, in what order
 
   function editList() {
-    var ids = shelf.map(function (a) { return a.id; });
+    var ids = shelf.filter(function (a) { return !a.allApps && !a.input; }).map(function (a) { return a.id; });
     return {ids: ids, rows: apps.slice().sort(function (a, b) {
       var ia = ids.indexOf(a.id), ib = ids.indexOf(b.id);
       if (ia >= 0 || ib >= 0) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -1370,13 +1765,32 @@
     if (!p) return null;
     var via = Prefs.openPicks() === 'nuvio' ? nuvio() : null;
     var app = via || Data.appFor(p.app);
-    if (!app) return null;
-    // Nuvio's own link for the title, as on Android (nuvio://tmdb/movie/603); webOS apps get links as contentTarget.
-    return {app: app, params: via ? {contentTarget: 'nuvio://tmdb/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.id} : null};
+    if (via) return {app: app, params: {contentTarget: 'nuvio://tmdb/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.id}};
+    if (app) return {app: app, params: null};
+    // On none of the TV's apps: Stremio, on the title's page where it reads the link (by its IMDb id).
+    var s = stremio();
+    if (!s) return null;
+    return {app: s, params: p.imdb ? {link: 'stremio:///detail/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.imdb} : null};
+  }
+
+  /** Stremio, when the TV has it. */
+  function stremio() {
+    for (var i = 0; i < apps.length; i++) if (/stremio/i.test(apps[i].id) || /^stremio\b/i.test(apps[i].title)) return apps[i];
+    return null;
+  }
+
+  /** The app a pick opens in, as a small mark at its poster's top right (its glyph, else its name's first letter). */
+  function badge(p, img) {
+    var t = pickTarget(p);
+    if (!t) return;
+    var b = el('div', 'badge', img), g = el('div', 'mark', b);
+    if (t.app.glyph) g.style.webkitMaskImage = g.style.maskImage = 'url(' + t.app.glyph + ')';
+    else { g.className = 'letter'; g.textContent = String(t.app.title).charAt(0).toUpperCase(); }
   }
 
   function launcher(id, name, params) {
     return function () {
+      noteUse(id);
       TV.launch(id, params || null, function (ok) {
         if (!ok) toast(trf("Couldn't open {app}.", {app: name || id}));
       });
@@ -1410,23 +1824,36 @@
   function activate() {
     switch (st.zone) {
       case Z.TOP:
-        if (st.top < 3) return;
-        if (st.top === 3) { var box2 = boxTV(); if (box2) launcher(box2.id, boxLabel())(); }
-        else if (st.top === 4) { st.zone = Z.SHELF; openDrawer(); st.drawer = 1 < drawerInputs ? 1 : 0; updateFocus(); }
-        else openSettings();
+        if (st.top < tabsN()) return;
+        if (topItems[st.top - tabsN()]) topItems[st.top - tabsN()][2]();
         return;
       case Z.CARDS:
-        var target = pickTarget(cards[st.card]);
-        if (target) launcher(target.app.id, target.app.title, target.params)();
+        var pick = cards[st.card];
+        if (pick && pick.more) { startMore(); return; }
+        var target = pickTarget(pick);
+        if (!target) return;
+        if (target.params) { launcher(target.app.id, target.app.title, target.params)(); return; }
+        // On the title's own page when Watchmode knows it (watchmode_key), else the app's home as before.
+        Data.titleLink(pick, function (link) { launcher(target.app.id, target.app.title, link ? {link: link} : null)(); });
         return;
       case Z.SHELF:
-        if (shelf[st.shelf]) launcher(shelf[st.shelf].id, shelf[st.shelf].title)();
+        if (shelf[st.shelf] && shelf[st.shelf].allApps) openDrawer();
+        else if (shelf[st.shelf]) launcher(shelf[st.shelf].id, shelf[st.shelf].title)();
         return;
       case Z.DRAWER:
         if (drawerItems[st.drawer]) drawerItems[st.drawer].run();
         return;
+      case Z.SEARCH:
+        openField('searchbar');   // the keyboard again
+        return;
+      case Z.ACT:
+        if (actionsFor()[st.act]) doAction(actionsFor()[st.act][0]);
+        return;
+      case Z.SPIDER:
+        springHold();
+        return;
       case Z.APPS:
-        if (others[st.grid]) launcher(others[st.grid].id, others[st.grid].title)();
+        if (apps[st.grid]) launcher(apps[st.grid].id, apps[st.grid].title)();
         return;
       case Z.SETTINGS:
         if (rowsNow[st.row]) { rowsNow[st.row].step(1); if (st.zone === Z.SETTINGS) renderSettings(); }
@@ -1449,7 +1876,69 @@
     }
   }
 
+  /**
+   * The three rows as a table: the tabs after the house, the genres and the kinds share columns, each as wide as its
+   * widest word in any of the rows (measured, so any language fits), every word at its column's left; the rows start
+   * where Explore does.
+   */
+  function alignRows() {
+    var tabs = $('tabs'), ex = tabs && tabs.children[Trakt.signedIn() ? 1 : 0];
+    if (!ex) return;
+    var rows = [[].slice.call(tabs.children, Trakt.signedIn() ? 1 : 0)];
+    if (hasSubs() && $('genres')) rows.push([].slice.call($('genres').children), [].slice.call($('subtabs').children));
+    var widths = [], r, c;
+    for (r = 0; r < rows.length; r++) for (c = 0; c < rows[r].length; c++) rows[r][c].style.width = '';
+    for (r = 0; r < rows.length; r++) {
+      for (c = 0; c < rows[r].length; c++) widths[c] = Math.max(widths[c] || 0, Math.ceil(rows[r][c].offsetWidth * 1.04));   // room for bold
+    }
+    if (rows.length > 1) {
+      for (r = 0; r < rows.length; r++) {
+        for (c = 0; c < rows[r].length; c++) { rows[r][c].style.width = widths[c] + 'px'; setClass(rows[r][c], 'col', true); }
+      }
+    }
+    var left = (tabs.offsetLeft + ex.offsetLeft) + 'px';
+    if ($('genres')) $('genres').style.left = left;
+    if ($('subtabs')) $('subtabs').style.left = left;
+  }
+
+  function renderSubs() {
+    var sub = $('subtabs');
+    if (!sub) { sub = el('div', '', $('tabs').parentNode); sub.id = 'subtabs'; }
+    sub.innerHTML = '';
+    if ($('genres')) $('genres').innerHTML = '';
+    if (!hasSubs()) return;
+    var names = [tr('kind|All'), tr('Movies'), tr('Shows')];
+    for (var i = 0; i < names.length; i++) hover(el('button', 'sub', sub, names[i]), Z.SUB, i);
+    // Above the kinds, the big genres (Data's GENRES, in this order).
+    var row = $('genres');
+    if (!row) { row = el('div', '', $('tabs').parentNode); row.id = 'genres'; }
+    row.innerHTML = '';
+    var genres = [tr('kind|All'), tr('genre|Adventure'), tr('genre|Comedy'), tr('genre|Drama'), tr('genre|Thriller'),
+      tr('genre|Animation'), tr('genre|Documentary')];
+    for (var g = 0; g < genres.length; g++) hover(el('button', 'sub', row, genres[g]), Z.GENRE, g);
+    alignRows();
+  }
+
+  /** A genre, as a sub-tab: its picks at once, from the row's start. */
+  function selectGenre(i) { st.genre = i; selectSub(st.sub || 0, true); }
+
+  /** A sub-tab, as a tab: focusing it shows its picks, from the row's start. */
+  function selectSub(i) {
+    st.sub = i;
+    if (searchMode) { searchMode = false; searchOpen = false; renderTop(); }
+    st.card = 0;
+    var holder = $('cards');
+    holder.style.webkitTransition = holder.style.transition = 'none';
+    cards = [];
+    renderCards();
+    layoutCards();
+    void holder.offsetWidth;
+    holder.style.webkitTransition = holder.style.transition = '';
+    updateFocus();
+  }
+
   function selectTab(i) {
+    if (searchMode) { searchMode = false; searchOpen = false; renderTop(); cards = []; renderCards(); }
     if (i === st.tab) return;
     st.tab = i;
     // A tab opens at its first pick, its row at the start: at once, as on Android, not sliding from the last tab's place.
@@ -1470,30 +1959,62 @@
         else if (dy > 0) { openDrawer(); return; }
         else if (dy < 0) {
           if (cards.length) { st.zone = Z.CARDS; st.card = nearest(cardNodes, centerX(tiles[st.shelf])); }
-          else { st.zone = Z.TOP; st.top = Data.hasKey() ? st.tab : 3; }
+          else if (spiderShown()) st.zone = Z.SPIDER;
+          else { st.zone = Z.TOP; st.top = Data.hasKey() ? st.tab : tabsN(); }
         }
         break;
       case Z.CARDS:
         if (dx) st.card = Math.max(0, Math.min(cards.length - 1, st.card + dx));
-        else if (dy < 0) { st.zone = Z.TOP; st.top = st.tab; }
+        else if (dy < 0) { if (hasSubs() && !searchMode) st.zone = Z.SUB; else { st.zone = Z.TOP; st.top = st.tab; } }
+        else if (actionsFor().length) { st.zone = Z.ACT; st.act = 0; }   // the buttons under the focused poster first
         else if (shelf.length) { st.zone = Z.SHELF; st.shelf = nearest(tiles, centerX(cardNodes[st.card])); }
         break;
       case Z.TOP:
         if (dx) {
-          st.top = Math.max(Data.hasKey() ? 0 : 3, Math.min(5, st.top + dx));   // without the picks the tabs can't hold focus
-          if (st.top < 3) selectTab(st.top);   // as on Apple TV: focusing a tab selects it
+          st.top = Math.max(Data.hasKey() ? 0 : tabsN(), Math.min(tabsN() - 1 + topItems.length, st.top + dx));   // without the picks the tabs can't hold focus
+          if (st.top < tabsN()) selectTab(st.top);
+          else if (topItems[st.top - tabsN()] && topItems[st.top - tabsN()][2] === openSearch) { openSearch(); return; }   // focus opens the field   // as on Apple TV: focusing a tab selects it
         } else if (dy > 0) {
-          if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length - 1, st.top < 3 ? 0 : cards.length - 1); }
+          if (st.top < tabsN() && hasSubs() && !searchMode) { st.zone = Z.GENRE; st.genre = st.genre || 0; }
+          else if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length - 1, st.top < tabsN() ? 0 : cards.length - 1); }
           else st.zone = Z.SHELF;
         }
         break;
+      case Z.SPIDER:
+        if (dy < 0) st.zone = hasSubs() ? Z.SUB : Z.TOP;
+        else if (dy > 0 && shelf.length) st.zone = Z.SHELF;
+        break;
+      case Z.ACT:
+        if (dx) st.act = Math.max(0, Math.min(actionsFor().length - 1, (st.act || 0) + dx));
+        else if (dy < 0) st.zone = Z.CARDS;
+        else if (shelf.length) { st.zone = Z.SHELF; st.shelf = nearest(tiles, centerX(cardNodes[st.card])); }
+        break;
+      case Z.SUB:
+        if (dx) selectSub(Math.max(0, Math.min(SUB_KIND.length - 1, (st.sub || 0) + dx)));
+        else if (dy < 0) st.zone = Z.GENRE;
+        else if (cards.length) st.zone = Z.CARDS;
+        else if (spiderShown()) st.zone = Z.SPIDER;   // an empty row: the spider can be picked
+        else if (shelf.length) st.zone = Z.SHELF;
+        break;
+      case Z.GENRE:
+        if (dx) selectGenre(Math.max(0, Math.min($('genres').children.length - 1, (st.genre || 0) + dx)));
+        else if (dy < 0) { st.zone = Z.TOP; st.top = st.tab; }
+        else { st.zone = Z.SUB; st.sub = st.sub || 0; }
+        break;
+      case Z.SEARCH:
+        if (dy > 0) { closeField('searchbar'); st.zone = cards.length ? Z.CARDS : Z.SHELF; }
+        else if (dx < 0) { closeSearch(); st.top = tabsN() - 1; selectTab(st.top); }   // to the last tab, past the magnifier
+        break;
       case Z.DRAWER:
-        if (dx) st.drawer = Math.max(0, Math.min(drawerItems.length - 1, st.drawer + dx));
-        else if (dy < 0) { closeDrawer(); return; }
+        var cols = DRAWER_COLS, at = st.drawer + dx + dy * cols;
+        if (dy < 0 && st.drawer < cols) { closeDrawer(); return; }
+        if (dx && Math.floor(at / cols) === Math.floor(st.drawer / cols) && at >= 0 && at < drawerItems.length) st.drawer = at;
+        else if (dy > 0 && Math.floor(st.drawer / cols) < Math.floor((drawerItems.length - 1) / cols)) st.drawer = Math.min(drawerItems.length - 1, at);
+        else if (dy < 0) st.drawer = at;
         break;
       case Z.APPS:
-        var g = st.grid + dx + dy * 5;
-        if (g >= 0 && g < others.length && (dx === 0 || Math.floor(g / 5) === Math.floor(st.grid / 5))) st.grid = g;
+        var g = st.grid + dx + dy * APP_COLS;
+        if (g >= 0 && g < apps.length && (dx === 0 || Math.floor(g / APP_COLS) === Math.floor(st.grid / APP_COLS))) st.grid = g;
         break;
       case Z.SETTINGS:
         if (dy) st.row = Math.max(0, Math.min(rowsNow.length - 1, st.row + dy));
@@ -1533,6 +2054,8 @@
     if (st.zone === Z.ABOUT) { closeAbout(); return; }
     if (sheetOpen()) { closeSheets(); return; }
     if (st.zone === Z.DRAWER) { closeDrawer(); return; }
+    if (st.zone === Z.ACT) { st.zone = Z.CARDS; updateFocus(); return; }
+    if (st.zone === Z.SEARCH || (searchMode && st.zone === Z.CARDS)) { closeSearch(); return; }
     if (st.zone !== Z.SHELF && shelf.length) { st.zone = Z.SHELF; updateFocus(); return; }
     TV.back();
   }
@@ -1543,10 +2066,13 @@
       if (saverOn || (sheetOpen() !== (zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.CITY || zone === Z.KEY || zone === Z.ABOUT))) return;
       if (zone === Z.DRAWER && st.zone !== Z.DRAWER) return;
       if (zone !== Z.DRAWER && st.zone === Z.DRAWER && zone !== Z.SHELF) return;
-      if (zone === Z.TOP && index < 3 && !Data.hasKey()) return;   // the tabs are hidden without the picks
+      if (zone === Z.TOP && index < tabsN() && !Data.hasKey()) return;   // the tabs are hidden without the picks
       if (zone === Z.SHELF && st.zone === Z.DRAWER) closeDrawer();
       st.zone = zone;
-      if (zone === Z.TOP) { st.top = index; if (index < 3) selectTab(index); }
+      if (zone === Z.TOP) { st.top = index; if (index < tabsN()) selectTab(index); }
+      else if (zone === Z.SUB) selectSub(index);
+      else if (zone === Z.GENRE) selectGenre(index);
+      else if (zone === Z.ACT) st.act = index;
       else if (zone === Z.CARDS) st.card = index;
       else if (zone === Z.SHELF) st.shelf = index;
       else if (zone === Z.DRAWER) st.drawer = index;
@@ -1731,17 +2257,20 @@
     else return;
     e.preventDefault();
   });
+  // Letting go of OK: the spider's spring (springHold) springs back.
+  document.addEventListener('keyup', function (e) { if (e.keyCode === TV.keys.ok && spring.holding) springRelease(); });
   document.addEventListener('mousemove', function () { poke(); });
+  window.addEventListener('load', alignRows);   // once the fonts are in, Explore's place is final
 
   /**
    * In a text field, the keys type (← → move in the text, Delete erases). OK or the keyboard's Done searches (or saves); Back,
    * its Cancel or ↑ ↓ leave the field. Samsung's keyboard sends Done as 65376 and Cancel as 65385. True: handled here.
    */
   function typing(k) {
-    var sheet = st.zone === Z.CITY ? 'citypick' : st.zone === Z.KEY ? 'keypick' : '';
+    var sheet = st.zone === Z.CITY ? 'citypick' : st.zone === Z.KEY ? 'keypick' : st.zone === Z.SEARCH ? 'searchbar' : '';
     if (!sheet || !typingIn(sheet)) return false;
-    if (k === TV.keys.ok || k === 65376) { if (st.zone === Z.CITY) searchCity(); else saveKey(); }
-    else if (k === TV.keys.back || k === 27 || k === 65385) { closeField(sheet); updateFocus(); }
+    if (k === TV.keys.ok || k === 65376) { if (st.zone === Z.CITY) searchCity(); else if (st.zone === Z.SEARCH) runSearch(); else saveKey(); }
+    else if (k === TV.keys.back || k === 27 || k === 65385) { closeField(sheet); if (st.zone === Z.SEARCH) closeSearch(); updateFocus(); }
     else if (k === TV.keys.up || k === TV.keys.down) { closeField(sheet); move(0, k === TV.keys.up ? -1 : 1); }
     return true;   // anything else types into the field
   }
@@ -1776,23 +2305,48 @@
       pickShelf();
       TV.inputs(function (list2) {
         inputs = list2;
+        pickShelf();   // again: Live TV and the inputs join the shelf
         if (done) done();
       });
     });
   }
 
   /** Back to the home screen (the app was opened again): the shelf, everything closed, the first tab at its first pick. */
+  /**
+   * Every entry to the screen (the app opened, opened again, or come back to from another app or Live TV) starts the
+   * same: Explore, All, All, no search, the shelf's first app focused, the first title's photo behind.
+   */
   function reset() {
     hideSaver();
     hideAmbient();
     closeSheets();
+    if (searchOpen || searchMode) closeField('searchbar');
+    searchOpen = false;
+    searchMode = false;
+    searchText = '';
+    searchStatus = '';
+    st.tab = startTab();
+    st.sub = 0;
+    st.genre = 0;
+    st.card = 0;
     st.zone = Z.SHELF;
     st.shelf = 0;
-    st.card = 0;
-    selectTab(0);
+    shelfFirst = 0;
+    cards = [];
+    if ($('tiles')) { renderTop(); renderCards(); renderShelf(); }
     updateFocus();
     restInDrawer();   // drawer_first: out again at once, not only after the TV lists its apps
   }
+
+  // Trakt: signs in with a code shown at the top while it isn't; signed in, the tabs become the account's.
+  var traktWas = Trakt.signedIn();
+  Trakt.onChange(function () {
+    if (Trakt.signedIn() !== traktWas) { traktWas = Trakt.signedIn(); cards = []; st.tab = startTab(); Data.traktChanged(); }
+    renderTop();
+    renderCards();
+    updateFocus();
+  });
+  if (Trakt.available() && !Trakt.signedIn()) Trakt.signIn();
 
   Data.onChange(function () {
     renderQuotes();
@@ -1813,7 +2367,7 @@
     // LG: with handlesRelaunch the app has to come to the front itself, or opening it again while it runs shows nothing.
     if (window.PalmSystem && window.PalmSystem.activate) window.PalmSystem.activate();
     reset();
-    loadApps(function () { renderShelf(); renderDrawer(); restInDrawer(); Data.refresh(); });
+    loadApps(function () { renderTop(); renderShelf(); renderDrawer(); restInDrawer(); Data.refresh(); });
   }
 
   window.addEventListener('resize', fit);
@@ -1826,7 +2380,8 @@
     hideAmbient();
     if (document.hidden) return;
     idleAt = Date.now();
-    loadApps(function () { renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
+    reset();   // back from another app: the same start as opening it
+    loadApps(function () { renderTop(); renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
   });
 
   I18N.set(Prefs.language());
@@ -1839,9 +2394,12 @@
   applyDim();
   tickClock();
   loadApps(function () {
+    st.tab = startTab();
     renderAll();
     restInDrawer();
     Data.refresh();
+    // The browser preview opened as index.html?saver: the screensaver at once (a key or the mouse closes it).
+    if (/[?&]saver(&|=|$)/.test(location.search)) setTimeout(function () { if (saverMode() === 'clock') showAmbient(); else showSaver(); }, 1500);
   });
   setInterval(function () {
     checkNight();
