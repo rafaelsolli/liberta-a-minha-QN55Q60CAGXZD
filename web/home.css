@@ -1072,3 +1072,121 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
    its first letter, so it keeps its column. */
 .tab.col, #genres .sub.col, #subtabs .sub.col { text-align: left; margin: 0 4px 0 0; padding: 0 26px;
   -webkit-box-sizing: border-box; box-sizing: border-box; -webkit-transform-origin: 26px 50%; transform-origin: 26px 50%; }
+
+/* The focused title's name and line at the screen's left edge, under the posters, its buttons right of them
+   (renderActions); the cards' own copies stay hidden. */
+.card .name, .card .meta, .card.focus .name, .card.focus .meta, .card.acting .name, .card.acting .meta { display: none; }
+#info { display: none; position: absolute; left: 80px; top: 758px; height: 80px; white-space: nowrap; }
+#info.on { display: block; }
+#info .name { position: absolute; left: 0; top: 0; max-width: 900px; overflow: hidden; text-overflow: ellipsis; font-size: 31px; font-weight: 600; color: #1D1D1F; }
+#info .meta { position: absolute; left: 0; top: 42px; max-width: 900px; overflow: hidden; text-overflow: ellipsis; font-size: 25px; font-weight: 500; color: #6E6E73; }
+.night #info .name { color: #F5F5F7; }
+.night #info .meta { color: rgba(245, 245, 247, 0.62); }
+#info #actions { top: 12px; }
+
+/* A title's page: its photo darkened behind, the X at the top right (focused), then name, line, overview, who made it and
+   the cast with their photos. */
+#detail { display: none; z-index: 5; background: #0B0B0D; color: #F5F5F7; }
+#detail.open { display: block; }
+#detail .back { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; background-size: cover; background-position: center top; opacity: 0.45; }
+#detail .shade { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+  background: -webkit-linear-gradient(left, rgba(11, 11, 13, 0.96), rgba(11, 11, 13, 0.75) 55%, rgba(11, 11, 13, 0.35));
+  background: linear-gradient(90deg, rgba(11, 11, 13, 0.96), rgba(11, 11, 13, 0.75) 55%, rgba(11, 11, 13, 0.35)); }
+#detail .close { position: absolute; left: 1772px; top: 69px; width: 68px; height: 68px; border-radius: 34px; background: rgba(255, 255, 255, 0.14); color: #F5F5F7;
+  -webkit-transition: -webkit-transform 0.18s, background-color 0.15s; transition: transform 0.18s, background-color 0.15s; }
+#detail .close.focus { background: #FFF; color: #1D1D1F; -webkit-transform: scale(1.1); transform: scale(1.1); }
+#detail .close .mark { position: absolute; left: 20px; top: 20px; width: 28px; height: 28px; background-color: currentColor;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+#detail .close .tip { position: absolute; right: 0; top: 80px; font-size: 20px; font-weight: 600; white-space: nowrap; color: #F5F5F7; }
+#detail .box { position: absolute; left: 120px; top: 150px; width: 1120px; }
+#detail .d-title { font-size: 64px; font-weight: 700; line-height: 1.1; }
+#detail .d-line { margin-top: 18px; font-size: 27px; font-weight: 500; color: rgba(245, 245, 247, 0.7); }
+/* The overview: at most 7 whole lines, the last ending in an ellipsis. */
+#detail .d-text { margin-top: 28px; font-size: 28px; line-height: 40px; max-height: 280px; overflow: hidden; color: rgba(245, 245, 247, 0.92);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 7; }
+/* The poster on the right, under the X; the people along the bottom, the director or creator first (a gap after). */
+#detail .d-poster { position: absolute; left: 1360px; top: 176px; width: 400px; height: 600px; border-radius: 18px; background: #2C2C2E center / cover no-repeat;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); }
+#detail .d-people { position: absolute; left: 120px; right: 120px; top: 846px; }
+#detail .d-who.maker + .d-who:not(.maker) { margin-left: 40px; }
+#detail .d-row { white-space: nowrap; }
+#detail .d-who { display: inline-block; width: 140px; margin-right: 18px; vertical-align: top; text-align: center; }
+#detail .d-face { width: 104px; height: 104px; margin: 0 auto; border-radius: 52px; background: #2C2C2E center / cover no-repeat; font-size: 40px; font-weight: 600; line-height: 104px; color: rgba(245, 245, 247, 0.6); }
+#detail .d-nm { margin-top: 10px; font-size: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#detail .d-rl { margin-top: 2px; font-size: 18px; color: rgba(245, 245, 247, 0.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Continue: when a show's next episode comes (dd/mm), at the poster's top left. */
+.card .airs { position: absolute; left: 12px; top: 12px; height: 40px; padding: 0 14px 0 12px; border-radius: 20px; background: rgba(16, 16, 18, 0.72);
+  color: #FFF; font-size: 21px; font-weight: 700; line-height: 40px; white-space: nowrap; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+.card .airs .mark { display: inline-block; width: 20px; height: 20px; margin-right: 8px; vertical-align: -3px; background-color: currentColor;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+
+/* The page's buttons and related posters (styles reused by the layout below). */
+#detail .d-text { -webkit-line-clamp: 5; max-height: 200px; }
+#detail .d-acts { margin-top: 26px; height: 56px; white-space: nowrap; }
+#detail .d-acts .act { position: relative; display: inline-block; width: 56px; height: 56px; margin-right: 22px; border-radius: 28px;
+  background: rgba(255, 255, 255, 0.14); color: #F5F5F7; -webkit-transition: -webkit-transform 0.18s, background-color 0.15s; transition: transform 0.18s, background-color 0.15s; }
+#detail .d-acts .act.focus { background: #FFF; color: #1D1D1F; -webkit-transform: scale(1.1); transform: scale(1.1); }
+#detail .d-acts .act .mark { position: absolute; left: 15px; top: 15px; width: 26px; height: 26px; background-color: currentColor;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+#detail .d-acts .act .tip { position: absolute; left: 0; top: 64px; font-size: 19px; font-weight: 600; white-space: nowrap; color: #F5F5F7; opacity: 0;
+  -webkit-transition: opacity 0.14s; transition: opacity 0.14s; }
+#detail .d-acts .act.focus .tip { opacity: 1; }
+#detail .d-rel { margin-top: 46px; }
+#detail .d-relhead { font-size: 22px; font-weight: 600; color: rgba(245, 245, 247, 0.7); margin-bottom: 12px; }
+#detail .d-relrow { white-space: nowrap; height: 186px; }
+#detail .d-relcard { display: inline-block; width: 120px; height: 180px; margin-right: 18px; border-radius: 12px; background: #2C2C2E center / cover no-repeat;
+  -webkit-transition: -webkit-transform 0.18s, box-shadow 0.18s; transition: transform 0.18s, box-shadow 0.18s; }
+#detail .d-relcard.focus { -webkit-transform: scale(1.1); transform: scale(1.1); box-shadow: 0 0 0 3px #FFF, 0 14px 30px rgba(0, 0, 0, 0.5); }
+
+/* The name in at most two lines; the related row at a fixed place over the people, the column above it fitted to it. */
+#detail .d-title { font-size: 58px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-height: 128px; }
+#detail .d-text.short { -webkit-line-clamp: 3; max-height: 120px; }
+#detail .d-rel { position: absolute; left: 120px; top: 620px; margin-top: 0; }
+
+/* (an earlier layout of the page; the one below overrides it) */
+#detail .d-poster { display: none; }
+#detail .box { width: 1080px; }
+#detail .d-text { -webkit-line-clamp: 9; max-height: 360px; }
+#detail .d-text.short { -webkit-line-clamp: 7; max-height: 280px; }
+#detail .d-rel { left: 1352px; top: 196px; width: 420px; }
+#detail .d-relrow { white-space: normal; height: auto; }
+#detail .d-relcard { margin: 0 18px 18px 0; }
+#detail .d-relcard:nth-child(3n) { margin-right: 0; }
+#detail .d-top .tip { opacity: 0; -webkit-transition: opacity 0.14s; transition: opacity 0.14s; }
+#detail .d-top.focus .tip { opacity: 1; }
+
+/* The clock screensaver: the clock and date in the middle of the screen's height, the itsy bitsy spider hanging from
+   the top on the right, faint (the swing is the empty row's, a longer thread). */
+#ambient .clock { top: 379px; }
+#ambient .date { top: 653px; }
+#ambient .side { top: 391px; }
+#ambient .amb-spider { position: absolute; left: 1420px; top: 0; width: 240px; height: 620px; overflow: hidden; color: rgba(245, 245, 247, 0.32); }
+#ambient .amb-spider .hang { position: absolute; left: 60px; top: -180px; width: 120px; height: 760px; -webkit-transform-origin: 60px 0; transform-origin: 60px 0;
+  -webkit-animation: swing 5.2s ease-in-out infinite; animation: swing 5.2s ease-in-out infinite; }
+#ambient .amb-spider .thread { position: absolute; left: 59px; top: 0; width: 2px; height: 602px; background: currentColor; opacity: 0.6; }
+#ambient .amb-spider .spider { position: absolute; left: 0; top: 556px; width: 120px; height: 120px; }
+#ambient .amb-spider .eye { fill: #050506; }
+
+/* The page, reworked: the poster at the left, the name, line and overview across the rest; the cast under them, then the
+   related titles in a row. */
+#detail .d-poster { display: block; left: 120px; top: 150px; width: 300px; height: 450px; }
+#detail .box { left: 470px; top: 150px; width: 1300px; }
+#detail .d-text { -webkit-line-clamp: 6; max-height: 240px; }
+#detail .d-text.short { -webkit-line-clamp: 5; max-height: 200px; }
+#detail .d-people { top: 636px; }
+#detail .d-rel { left: 120px; top: 806px; width: 1680px; }
+#detail .d-relhead { margin-bottom: 10px; }
+#detail .d-relrow { white-space: nowrap; height: 190px; }
+#detail .d-relcard { width: 116px; height: 174px; margin: 0 20px 0 0; }
+#detail .d-relcard:nth-child(3n) { margin-right: 20px; }
+#detail .d-who { width: 136px; }
+#detail .d-face { width: 96px; height: 96px; border-radius: 48px; line-height: 96px; }
+
+/* A thin line between who made it and the cast. */
+#detail .d-who { position: relative; }
+#detail .d-who.maker + .d-who:not(.maker)::before { content: ''; position: absolute; left: -29px; top: 14px; width: 1px; height: 96px; background: rgba(245, 245, 247, 0.28); }
+
+/* "Cast" over the people, as "More like this" over the related row: both a little lower. */
+#detail .d-people { top: 622px; }
+#detail .d-rel { top: 828px; }

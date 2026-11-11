@@ -511,7 +511,10 @@ var Data = (function () {
 
   /** The pick's poster: RPDB's with its ratings when there's a key and an IMDb id, else TMDB's. */
   function poster(p, size) {
-    if (CONFIG.rpdbKey && p.imdb) return 'https://api.ratingposterdb.com/' + encodeURIComponent(CONFIG.rpdbKey) + '/imdb/poster-default/' + p.imdb + '.jpg';
+    var rpdb = CONFIG.rpdbKey && 'https://api.ratingposterdb.com/' + encodeURIComponent(CONFIG.rpdbKey);
+    if (rpdb && p.imdb) return rpdb + '/imdb/poster-default/' + p.imdb + '.jpg';
+    // Without an IMDb id (a related title, not detailed): RPDB takes TMDB's too.
+    if (rpdb && p.id && (p.kind === 'movie' || p.kind === 'tv')) return rpdb + '/tmdb/poster-default/' + (p.kind === 'tv' ? 'series-' : 'movie-') + p.id + '.jpg';
     return p.poster ? 'https://image.tmdb.org/t/p/' + (size || 'w342') + p.poster : '';
   }
 
@@ -530,6 +533,33 @@ var Data = (function () {
       get(WATCHMODE + '/title/' + found.id + '/sources/?regions=' + REGION + '&apiKey=' + encodeURIComponent(key), {}, function (e2, sources) {
         if (e2) { answer(''); return; }
         keep(sourceLink(sources || [], p.app));
+      });
+    });
+  }
+
+  function serviceFor(p, done) {
+    var key = String(CONFIG.watchmodeKey || '').trim(), id = 'any:' + p.kind + ':' + p.id, links = wmLinks();
+    if (!key || wmRefused) { done(null); return; }
+    function pick(found) {
+      if (!found) { done(null); return; }
+      var app = appFor(found.app);
+      done(app && usable(found.app) ? {app: app, link: found.link} : null);
+    }
+    if (links[id] !== undefined) { pick(links[id]); return; }
+    var answered = false;
+    setTimeout(function () { if (!answered) { answered = true; done(null); } }, 4000);
+    function keep(found) { links = wmLinks(); links[id] = found; store('wm', links); if (!answered) { answered = true; pick(found); } }
+    get(WATCHMODE + '/search/?search_field=tmdb_' + p.kind + '_id&search_value=' + p.id + '&apiKey=' + encodeURIComponent(key), {}, function (e, r) {
+      var t = !e && r && r.title_results && r.title_results[0];
+      if (!t) { if (!e) keep(null); else if (!answered) { answered = true; done(null); } return; }
+      get(WATCHMODE + '/title/' + t.id + '/sources/?regions=' + REGION + '&apiKey=' + encodeURIComponent(key), {}, function (e2, sources) {
+        if (e2) { if (!answered) { answered = true; done(null); } return; }
+        for (var s = 0; s < SERVICES.length; s++) {
+          if (!usable(SERVICES[s][1])) continue;
+          var link = sourceLink(sources || [], SERVICES[s][1]);
+          if (link) { keep({app: SERVICES[s][1], link: link}); return; }
+        }
+        keep(null);
       });
     });
   }
@@ -838,7 +868,7 @@ var Data = (function () {
     {label: 'genre|Documentary', movie: [99], tv: [99], trakt: ['documentary']}
   ];
 
-  var TAB_STEP = 20, shownN = [TAB_STEP, TAB_STEP, TAB_STEP, TAB_STEP], moreLeft = [false, false, false, false];
+  var TAB_STEP = 20, shownN = [TAB_STEP, TAB_STEP, TAB_STEP, TAB_STEP, TAB_STEP], moreLeft = [false, false, false, false, false];
 
   // The filters are applied before TMDB is asked: Trakt gives each title's genres with its lists (extended=full), and
   // trending comes already filtered by Trakt for a genre. Only the titles a filter keeps are detailed, 20 at a time, so
@@ -873,7 +903,7 @@ var Data = (function () {
 
   /**
    * The picks of a tab from Trakt's lists: 0 Explore (trending on Trakt), 1 For You (its recommendations), 2 Continue
-   * Watching (paused, or a show's next episode), 3 Watchlist. Every detailed title shows, on one of the TV's apps or
+   * Watching (paused, or a show's next episode), 3 Watchlist, 4 Rewatch. Every detailed title shows, on one of the TV's apps or
    * not (home.js opens the rest in Stremio).
    */
   function traktTab(tab, kind, genre) {
@@ -891,7 +921,7 @@ var Data = (function () {
       if (p.detailed && keyInGenre(keys[i], G)) out.push(p);
     }
     for (var j = 0; j < keys.length; j++) if (keyInGenre(keys[j], G) !== false) seen++;
-    moreLeft[tab] = seen > out.length;
+    moreLeft[tab] = seen > out.length || (tab === 2 && !!(L.restShows && L.restShows.length));   // shows left to check
     return out;
   }
 
@@ -912,14 +942,38 @@ var Data = (function () {
       }
       if (hot) return hot;
     }
-    return tab === 0 ? L.trending || [] : tab === 1 ? L.recommended : tab === 2 ? L.progress.map(function (g) { return g.key; }) : L.watchlist;
+    // Continue: what's begun or has an episode out, then (in date order) the shows with one coming in the next weeks.
+    return tab === 0 ? L.trending || [] : tab === 1 ? L.recommended
+      : tab === 2 ? L.progress.map(function (g) { return g.key; }).concat((L.upcoming || []).map(function (u) { return u.key; }))
+      : tab === 4 ? L.rewatch || [] : L.watchlist;   // 4 Rewatch: what's been watched, newest first
+  }
+
+  /**
+   * Continue's arrow: once the episodes found so far are all shown, the next 30 shows are checked (newest watched
+   * first), and again while a batch finds none, so the row only waits for real ones.
+   */
+  var checkingMore = false;
+  function moreUpNext() {
+    var L = tk.lists;
+    detailTrakt();
+    if (!L || checkingMore || !L.restShows || !L.restShows.length) return;
+    if (candidates(2, view.kind, view.genre).length >= shownN[2]) return;   // enough found already
+    checkingMore = true;
+    Trakt.upNextOf(L.restShows.splice(0, 30), function (found) {
+      checkingMore = false;
+      L.progress = L.progress.concat(found);
+      saveTrakt();
+      if (!found.length && L.restShows.length) { moreUpNext(); return; }
+      detailTrakt();
+      changed();
+    });
   }
 
   function refreshTrakt() {
     if (!Trakt.signedIn() || fetchingTrakt || !KEY || !installed.length) return;
     var t = Date.now();
     // Lists kept from before they carried Trakt's genres (or trending) are fetched again at once.
-    if (tk.lists && tk.lists.trending && tk.lists.genres && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
+    if (tk.lists && tk.lists.v === 7 && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
     fetchingTrakt = true;
     Trakt.lists(function (err, lists) {
       fetchingTrakt = false;
@@ -945,7 +999,7 @@ var Data = (function () {
       }
     }
     if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre);
-    for (var t = 0; t < 4; t++) take(t, null, 0);
+    for (var t = 0; t < 5; t++) take(t, null, 0);
     if (!todo.length) { changed(); return; }
     detailingTrakt = true;
     var gen = detailGen, done = 0;
@@ -981,6 +1035,39 @@ var Data = (function () {
     });
   }
 
+  // MARK: - A title's page (the details modal): overview, year, genres, length, TMDB's score, cast and who made it
+
+  /** done(info): {overview, year, genres, length, score, people: [{name, role, photo, maker}]}: who directed (a movie) or
+   * created (a show) first, then the cast. */
+  function fullDetails(p, done) {
+    tmdb('/' + p.kind + '/' + p.id + '?language=' + lang() + '&append_to_response=credits', function (err, o) {
+      if (err || !o) { done(null); return; }
+      var date = o.release_date || o.first_air_date || '', info = {
+        overview: o.overview || '', year: date.slice(0, 4),
+        genres: (o.genres || []).map(function (g) { return genre(g.name); }).slice(0, 3),
+        length: p.kind === 'movie' && o.runtime > 0 ? (Math.floor(o.runtime / 60) ? trf('{h}h {m}m', {h: Math.floor(o.runtime / 60), m: o.runtime % 60}) : trf('{m}m', {m: o.runtime}))
+          : p.kind === 'tv' && o.number_of_seasons > 0 ? plural('plural|one:{n} season|other:{n} seasons', o.number_of_seasons) : '',
+        score: o.vote_average > 0 && o.vote_count > 20 ? (Math.round(o.vote_average * 10) / 10).toFixed(1) : '',
+        people: []
+      };
+      function photo(path) { return path ? 'https://image.tmdb.org/t/p/w185' + path : ''; }
+      var makers = p.kind === 'tv' ? (o.created_by || []) : ((o.credits && o.credits.crew) || []).filter(function (c) { return c.job === 'Director'; });
+      for (var m = 0; m < makers.length && m < 2; m++) {
+        info.people.push({name: makers[m].name, role: p.kind === 'tv' ? tr('details|Creator') : tr('details|Director'), photo: photo(makers[m].profile_path), maker: true});
+      }
+      var cast = (o.credits && o.credits.cast) || [];
+      for (var i = 0; i < cast.length && info.people.length < 10; i++) {
+        info.people.push({name: cast[i].name, role: cast[i].character || '', photo: photo(cast[i].profile_path)});
+      }
+      if (info.overview || I18N.lang === 'en') { done(info); return; }
+      // No overview in the TV's language: TMDB's English one.
+      tmdb('/' + p.kind + '/' + p.id + '?language=en-US', function (e2, en) {
+        if (!e2 && en && en.overview) info.overview = en.overview;
+        done(info);
+      });
+    });
+  }
+
   // MARK: - Favorites and deleted: a title favorited shows in the home tab too; one deleted shows nowhere but the trash
   // tab. Kept in this TV's storage apart from the settings (settings_on_tv=false leaves them), each with what drawing
   // it needs, so it shows even once it's left Trakt's lists. Newest first.
@@ -1001,6 +1088,8 @@ var Data = (function () {
     else if (what === 'unfav') delete marks.fav[k];
     else if (what === 'trash') { marks.trash[k] = snapshot(p); delete marks.fav[k]; }
     else if (what === 'restore') delete marks.trash[k];
+    // Trakt stops recommending a deleted title, and does again once it's restored.
+    if ((what === 'trash' || what === 'restore') && Trakt.signedIn()) Trakt.hideRecommendation(p, what === 'trash', function () {});
     store('marks', marks);
     changed();
   }
@@ -1048,15 +1137,74 @@ var Data = (function () {
     /** Whether a tab has more than it shows (its last card is then an arrow for 20 more). */
     hasMore: function (tab) { return Trakt.signedIn() && typeof tab === 'number' && !!moreLeft[tab]; },
     /** 20 more of a tab: their details come, and the row grows. */
-    more: function (tab) { if (typeof tab !== 'number') return; shownN[tab] += TAB_STEP; detailTrakt(); },
+    more: function (tab) {
+      if (typeof tab !== 'number') return;
+      shownN[tab] += TAB_STEP;
+      if (tab === 2) moreUpNext(); else detailTrakt();
+    },
     /** tab: 'fav', 'trash', or Trakt's 0 to 3 (the kinds' tabs without Trakt); the deleted show only in 'trash'. */
     tabPicks: function (tab, kind, genre) {
       if (tab === 'fav' || tab === 'trash') return marked(tab, kind, genre);
       return (Trakt.signedIn() ? traktTab(tab, kind, genre) : now(kind)).filter(function (p) { return !deleted(p); });
     },
     mark: mark,
+    /** Continue's date for a show whose next episode is still to come: its air time (ISO), else ''. */
+    nextAiring: function (p) {
+      var L = tk.lists, k = markKey(p);
+      for (var i = 0; L && L.upcoming && i < L.upcoming.length; i++) if (L.upcoming[i].key === k) return L.upcoming[i].date;
+      return '';
+    },
+    /** Opened from here: begun on Trakt (a playback point at 1%) and first in Continue. */
+    started: function (p) {
+      var L = tk.lists, k = markKey(p), ep = null;
+      if (!L || !Trakt.signedIn()) return;
+      for (var i = 0; i < L.progress.length; i++) if (L.progress[i].key === k && L.progress[i].season) ep = {season: L.progress[i].season, number: L.progress[i].number};
+      Trakt.started(p, ep, function (err, at) {
+        if (err) return;
+        L.progress = [{key: k, season: at ? at.season : 0, number: at ? at.number : 0, paused: true}].concat(L.progress.filter(function (g) { return g.key !== k; }));
+        L.upcoming = (L.upcoming || []).filter(function (u) { return u.key !== k; });
+        saveTrakt();
+        changed();
+      });
+    },
+    inWatchlist: function (p) { return !!tk.lists && tk.lists.watchlist.indexOf(markKey(p)) >= 0; },
+    setWatchlist: function (p, add, done) {
+      var L = tk.lists, k = markKey(p);
+      if (!L) return;
+      L.watchlist = L.watchlist.filter(function (x) { return x !== k; });
+      if (add) L.watchlist.unshift(k);
+      saveTrakt();
+      changed();
+      Trakt.watchlist(p, add, done);
+    },
+    /**
+     * Before Stremio, for a title TMDB puts on none of the TV's apps: Watchmode's subscriptions in the region, on one of
+     * them, done({app, link}); else done(null).
+     */
+    serviceFor: function (p, done) { serviceFor(p, done); },
+    /**
+     * Mark watched (any title) or stop watching (Continue): changed here at once, then on Trakt; done(error) if Trakt
+     * didn't take it (the change stays here until the lists come again).
+     */
+    traktMark: function (p, what, done) {
+      var L = tk.lists, k = markKey(p), entry = null;
+      if (!L) { done(new Error('no lists')); return; }
+      for (var i = 0; i < L.progress.length; i++) if (L.progress[i].key === k) entry = L.progress[i];
+      L.progress = L.progress.filter(function (g) { return g.key !== k; });
+      if (L.restShows) L.restShows = L.restShows.filter(function (s) { return s.key !== k; });
+      if (what === 'watched') {
+        L.watched[k] = true;
+        L.watchlist = L.watchlist.filter(function (x) { return x !== k; });
+        L.rewatch = [k].concat((L.rewatch || []).filter(function (x) { return x !== k; }));
+        Trakt.markWatched(p.kind, p.id, done);
+      } else {
+        Trakt.stopWatching(p.kind, p.id, entry && entry.pid, done);
+      }
+      saveTrakt();
+      changed();
+    },
     /** Still fetching or detailing picks: an empty row may fill yet (home.js shows dots, not "nothing here"). */
-    busy: function () { return !!(fetchingRecs || fetchingTrakt || detailingTrakt); },
+    busy: function () { return !!(fetchingRecs || fetchingTrakt || detailingTrakt || checkingMore); },
     isFav: function (p) { return !!marks.fav[markKey(p)]; },
     favCount: function () { var n = 0; for (var k in marks.fav) if (Object.prototype.hasOwnProperty.call(marks.fav, k)) n++; return n; },
     /** Signed in or out of Trakt: its lists are fetched again. */
@@ -1082,6 +1230,19 @@ var Data = (function () {
     showcase: all,
     poster: poster,
     titleLink: titleLink,
+    fullDetails: fullDetails,
+    /** TMDB's recommendations for a title, for its page: done([picks]) (poster, photo, name; detailed on opening). */
+    related: function (p, done) {
+      tmdb('/' + p.kind + '/' + p.id + '/recommendations?language=' + lang(), function (err, r) {
+        var out = [];
+        for (var i = 0; !err && r && r.results && i < r.results.length && out.length < 7; i++) {
+          var o = r.results[i];
+          if (!o.poster_path || deleted({kind: p.kind, id: o.id})) continue;
+          out.push({id: o.id, kind: p.kind, title: p.kind === 'movie' ? o.title : o.name, poster: o.poster_path, backdrop: o.backdrop_path || '', meta: '', app: null});
+        }
+        done(out);
+      });
+    },
     genres: function () { return GENRES; },
     search: search,
     image: function (path, size) { return path ? 'https://image.tmdb.org/t/p/' + (size || 'w1280') + path : ''; },
@@ -1169,7 +1330,7 @@ var Trakt = (function () {
   'use strict';
   var API = 'https://api.trakt.tv', ID = String((window.CONFIG || {}).traktClientId || '').trim();
   // Long lists (only TMDB ids: small); Data details 20 more of a tab each time its last card, the arrow, is opened.
-  var WATCHLIST_MAX = 200, RECOMMENDED_MAX = 50, TRENDING_MAX = 60, UP_NEXT_SHOWS = 12;
+  var WATCHLIST_MAX = 200, RECOMMENDED_MAX = 50, TRENDING_MAX = 60, UP_NEXT_SHOWS = 60;   // up next: one request a show
   var state = {code: '', url: '', message: ''}, busy = false, listeners = [];
 
   function load() { try { return JSON.parse(localStorage.getItem('fmtv.trakt')) || {}; } catch (e) { return {}; } }
@@ -1337,7 +1498,9 @@ var Trakt = (function () {
   /** In steps, one request at a time: each part failing on its own leaves the rest. */
   function lists(done) {
     // genres: Trakt's genre slugs of each title (extended=full), so a genre filter needs no TMDB details first.
-    var out = {progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}}, shows = [], at = {};
+    // v: 7 with Rewatch (lists kept from before are fetched again).
+    var hidden = {};
+    var out = {v: 7, upcoming: [], progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}}, shows = [], at = {};
     function full(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'extended=full'; }
     function genresOf(item, type, k) { var o = item && item[type] ? item[type] : item; if (o && o.genres) out.genres[k] = o.genres; }
     function has(k) { for (var i = 0; i < out.progress.length; i++) if (out.progress[i].key === k) return true; return false; }
@@ -1362,23 +1525,18 @@ var Trakt = (function () {
           var movie = a[i].type === 'movie', k = key(a[i], movie ? 'movie' : 'show'), ep = movie ? null : a[i].episode;
           if (!k || has(k) || (at[k] && at[k] >= a[i].paused_at)) continue;   // watched since it was paused
           genresOf(a[i], movie ? 'movie' : 'show', k);
-          out.progress.push({key: k, season: ep ? ep.season : 0, number: ep ? ep.number : 0, paused: true});
+          if (hidden[k]) continue;   // hidden from progress on Trakt (Stop watching)
+          out.progress.push({key: k, season: ep ? ep.season : 0, number: ep ? ep.number : 0, paused: true, pid: a[i].id});
         }
         next();
       });
     }
     function upNext(next) {
       shows.sort(function (x, y) { return x.at < y.at ? 1 : x.at > y.at ? -1 : 0; });
-      var todo = shows.filter(function (s) { return s.trakt > 0 && !has(s.key); }).slice(0, UP_NEXT_SHOWS), i = 0;
-      (function one() {
-        if (i >= todo.length) { next(); return; }
-        var s = todo[i++];
-        get('/shows/' + s.trakt + '/progress/watched?specials=false&count_specials=false', function (err, p) {
-          var n = p && p.next_episode;
-          if (!err && n && p.completed < p.aired) out.progress.push({key: s.key, season: n.season, number: n.number, paused: false});
-          one();
-        });
-      })();
+      var all = shows.filter(function (s) { return s.trakt > 0 && !has(s.key) && !hidden[s.key]; });
+      // The rest, newest first, for Continue's arrow (upNextMore): checked 30 at a time as it's reached.
+      out.restShows = all.slice(UP_NEXT_SHOWS).map(function (s) { return {key: s.key, trakt: s.trakt}; });
+      upNextOf(all.slice(0, UP_NEXT_SHOWS), function (found) { out.progress = out.progress.concat(found); next(); });
     }
     function listed(path, type, list, max, next) {
       get(full(path), function (err, a) {
@@ -1392,7 +1550,25 @@ var Trakt = (function () {
       });
     }
     var mixed = {movies: [], shows: []}, picks = {movies: [], shows: []}, hot = {movies: [], shows: []};
+    // The calendar: the next episode of each show in the next 3 weeks, for Continue's dates.
+    function extras(next) {
+          var today = new Date().toISOString().slice(0, 10);
+          get('/calendars/my/shows/' + today + '/21', function (e3, cal) {
+            var seen = {};
+            for (var c = 0; !e3 && cal && c < cal.length; c++) {
+              var k3 = key(cal[c], 'show'), ep = cal[c].episode;
+              if (!k3 || seen[k3] || hidden[k3] || has(k3) || !ep) continue;
+              seen[k3] = true;
+              out.upcoming.push({key: k3, season: ep.season, number: ep.number, date: cal[c].first_aired});
+            }
+            out.upcoming.sort(function (x, y) { return x.date < y.date ? -1 : x.date > y.date ? 1 : 0; });
+            next();
+          });
+    }
     function both(a, b, list, max) { for (var i = 0; i < max; i++) { if (a[i]) list.push(a[i]); if (b[i]) list.push(b[i]); } }
+    // The shows hidden from progress (Stop watching here, or Trakt's own Drop): left out of Continue.
+    get('/users/hidden/progress_watched?type=show&limit=1000', function (herr, ha) {
+      for (var h = 0; !herr && ha && h < ha.length; h++) { var hk = key(ha[h], 'show'); if (hk) hidden[hk] = true; }
     watched('/sync/watched/movies', 'movie', function () {
       watched('/sync/watched/shows?extended=noseasons', 'show', function () {
         playback(function () {
@@ -1406,7 +1582,9 @@ var Trakt = (function () {
                         both(mixed.movies, mixed.shows, out.watchlist, WATCHLIST_MAX);
                         both(picks.movies, picks.shows, out.recommended, RECOMMENDED_MAX);
                         both(hot.movies, hot.shows, out.trending, TRENDING_MAX);
-                        done(null, out);
+                        // Rewatch: everything watched, the last watched first (when it was, or marked so).
+                        out.rewatch = Object.keys(at).sort(function (x, y) { return at[x] < at[y] ? 1 : at[x] > at[y] ? -1 : 0; }).slice(0, 1000);
+                        extras(function () { done(null, out); });
                       });
                     });
                   });
@@ -1417,6 +1595,72 @@ var Trakt = (function () {
         });
       });
     });
+    });
+  }
+
+  /** A change on the account: done(error). */
+  function write(method, path, body, done) {
+    token(function (err, access) {
+      if (err) { done(err); return; }
+      send(method, path, body, access, function (s) { done(s >= 200 && s < 300 ? null : new Error('HTTP ' + s)); });
+    });
+  }
+
+  function ids(kind, p) { var o = {ids: {tmdb: p.id}}; if (p.imdb) o.ids.imdb = p.imdb; return o; }
+  function items(kind, p) { var o = {}; o[kind === 'movie' ? 'movies' : 'shows'] = [ids(kind, p)]; return o; }
+
+  /**
+   * "Started" (opened from here): a playback point at 1% on Trakt, so it's in Continue as begun, never marked watched by
+   * itself (a check-in would be). A show's at its next episode (its first when never watched). done(error, episode).
+   */
+  function started(p, episode, done) {
+    function pause(body, ep) {
+      token(function (err, access) {
+        if (err) { done(err); return; }
+        send('POST', '/scrobble/pause', body, access, function (s) { done(s >= 200 && s < 300 ? null : new Error('HTTP ' + s), ep); });
+      });
+    }
+    if (p.kind === 'movie') { pause({movie: ids('movie', p), progress: 1}, null); return; }
+    function at(ep) { pause({show: ids('tv', p), episode: {season: ep.season, number: ep.number}, progress: 1}, ep); }
+    if (episode) { at(episode); return; }
+    if (!p.imdb) { at({season: 1, number: 1}); return; }
+    get('/shows/' + p.imdb + '/progress/watched?specials=false&count_specials=false', function (err, pr) {
+      var n = !err && pr && pr.next_episode;
+      at(n ? {season: n.season, number: n.number} : {season: 1, number: 1});
+    });
+  }
+
+  function watchlist(p, add, done) { write('POST', add ? '/sync/watchlist' : '/sync/watchlist/remove', items(p.kind, p), done); }
+
+  /** Trakt stops recommending it (hide), or does again (unhide): the bin's delete and restore. */
+  function hideRecommendation(p, hide, done) {
+    write('POST', hide ? '/users/hidden/recommendations' : '/users/hidden/recommendations/remove', items(p.kind, p), done);
+  }
+
+  /** Into the history: a movie, or every aired episode of a show (the show done). */
+  function markWatched(kind, tmdb, done) {
+    write('POST', '/sync/history', kind === 'movie' ? {movies: [{ids: {tmdb: tmdb}}]} : {shows: [{ids: {tmdb: tmdb}}]}, done);
+  }
+
+  /** Stop watching: a show hidden from progress (as Trakt's Drop), and a paused one's playback point removed. */
+  function stopWatching(kind, tmdb, pid, done) {
+    function playback() { if (pid) write('DELETE', '/sync/playback/' + pid, null, done); else done(null); }
+    if (kind !== 'tv') { playback(); return; }
+    write('POST', '/users/hidden/progress_watched', {shows: [{ids: {tmdb: tmdb}}]}, function (err) { if (err) done(err); else playback(); });
+  }
+
+  /** Each show's next episode, when one is out and not watched: done([{key, season, number, paused: false}]). */
+  function upNextOf(list, done) {
+    var found = [], i = 0;
+    (function one() {
+      if (i >= list.length) { done(found); return; }
+      var s = list[i++];
+      get('/shows/' + s.trakt + '/progress/watched?specials=false&count_specials=false', function (err, p) {
+        var n = p && p.next_episode;
+        if (!err && n && p.completed < p.aired) found.push({key: s.key, season: n.season, number: n.number, paused: false});
+        one();
+      });
+    })();
   }
 
   /** Trending on Trakt in these genres (Trakt's own filter), movies and shows interleaved: done(null, keys, genres). */
@@ -1445,6 +1689,12 @@ var Trakt = (function () {
   }
 
   return {
+    started: started,
+    watchlist: watchlist,
+    hideRecommendation: hideRecommendation,
+    markWatched: markWatched,
+    stopWatching: stopWatching,
+    upNextOf: upNextOf,
     trending: trending,
     available: function () { return !!ID; },
     signedIn: signedIn,

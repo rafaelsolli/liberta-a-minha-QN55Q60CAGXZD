@@ -440,11 +440,11 @@
 
   // MARK: - Focus
 
-  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about', SEARCH: 'search', SUB: 'sub', GENRE: 'genre', ACT: 'act', SPIDER: 'spider'};
+  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about', SEARCH: 'search', SUB: 'sub', GENRE: 'genre', ACT: 'act', SPIDER: 'spider', DETAIL: 'detail'};
   var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, city: 0, key: 0, sub: 0, genre: 0, act: 0};
   var cards = [];
 
-  function sheetOpen() { return st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG || st.zone === Z.CITY || st.zone === Z.KEY || st.zone === Z.ABOUT; }
+  function sheetOpen() { return st.zone === Z.DETAIL || st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG || st.zone === Z.CITY || st.zone === Z.KEY || st.zone === Z.ABOUT; }
 
   function updateFocus() {
     var i, list;
@@ -539,8 +539,8 @@
   var TAB_KIND = [null, 'movie', 'tv'];
 
   /** How many tabs: 4 with Trakt (Explore, For You, Continue Watching, Watchlist), else 3. The round buttons follow. */
-  // With Trakt: the favorites (a house, no name), Trakt's four, then the deleted (a bin). Data's tab for each.
-  var TRAKT_TABS = ['fav', 0, 1, 2, 3, 'trash'];
+  // With Trakt: the favorites (a house, no name), Trakt's five, then the deleted (a bin). Data's tab for each.
+  var TRAKT_TABS = ['fav', 0, 1, 2, 3, 4, 'trash'];
   function tabsN() { return Trakt.signedIn() ? TRAKT_TABS.length : 3; }
   function dataTab() { return Trakt.signedIn() ? TRAKT_TABS[st.tab] : st.tab; }
   /** Where every entry lands: Explore (Trakt's, or the first tab without it). */
@@ -556,7 +556,7 @@
     tabs.innerHTML = '';
     renderSubs();
     // Signed in to Trakt: the account's tabs (Data.tabPicks) in place of the kinds.
-    var names = Trakt.signedIn() ? ['icon:home', tr('Explore'), tr('tab|Discover'), tr('tab|Continue'), tr('tab|Watchlist'), 'icon:trash']
+    var names = Trakt.signedIn() ? ['icon:home', tr('Explore'), tr('tab|Discover'), tr('tab|Continue'), tr('tab|Watchlist'), tr('tab|Rewatch'), 'icon:trash']
         : [tr('Explore'), tr('Movies'), tr('Shows')];
     for (var i = 0; i < names.length; i++) {
       var icon = names[i].indexOf('icon:') === 0, t = el('button', 'tab' + (icon ? ' icon' : ''), tabs, icon ? '' : names[i]);
@@ -711,6 +711,7 @@
       if (CONFIG.rpdbKey && p.imdb) poster.style.backgroundPosition = '50% 100%';
       el('div', 'layer back', img);
       badge(p, img);
+      airBadge(p, img);
       el('div', 'name', card, p.title);
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
@@ -821,15 +822,20 @@
     spring.holding = false;
   }
 
+  /** One piece swinging from a point above its clip: the thread (its top hidden) tied to the spider's head. */
+  function hangSpider(clip) {
+    var hang = el('div', 'hang', clip);
+    el('div', 'thread', hang);
+    el('div', 'spider', hang).innerHTML = SPIDER;
+    return hang;
+  }
+
   function renderEmpty(empty) {
     var e = $('empty');
     if (!e) {
       e = el('div', '', $('cards').parentNode);
       e.id = 'empty';
-      // One piece swinging from a point above the clip: the thread (its top hidden) tied to the spider's head.
-      var hang = el('div', 'hang', el('div', 'clip', e));
-      el('div', 'thread', hang);
-      el('div', 'spider', hang).innerHTML = SPIDER;
+      hangSpider(el('div', 'clip', e));
       el('div', 'line', e);
       var dots = el('div', 'dots', e);
       for (var d = 0; d < 3; d++) el('span', '', dots);
@@ -852,21 +858,44 @@
   function actionsFor() {
     var p = cards[st.card], t = searchMode ? null : dataTab();   // search results: as in a Trakt tab, whatever tab is under them
     if (!Trakt.signedIn() || !p || p.more) return [];
-    if (t === 'trash') return [['fav', 'heart', tr('action|Favorite')], ['restore', 'restore', tr('action|Restore')]];
-    if (t === 'fav') return [['unfav', 'unheart', tr('action|Unfavorite')], ['trash', 'trash', tr('action|Delete')]];
-    return [Data.isFav(p) ? ['unfav', 'unheart', tr('action|Unfavorite')] : ['fav', 'heart', tr('action|Favorite')],
-      ['trash', 'trash', tr('action|Delete')]];
+    var more = ['details', 'eye', tr('action|Details')];   // the title's page, first
+    var seen = ['watched', 'check', tr('action|Mark watched')];   // on Trakt: a movie, or a show's every episode
+    if (t === 'trash') return [more, seen, ['fav', 'heart', tr('action|Favorite')], ['restore', 'restore', tr('action|Restore')]];
+    if (t === 'fav') return [more, seen, ['unfav', 'unheart', tr('action|Unfavorite')], ['trash', 'trash', tr('action|Delete')]];
+    var acts = t === 4 ? [more] : [more, seen];   // Rewatch: watched already
+    if (t === 2) acts.push(['drop', 'block', tr('action|Stop watching')]);   // Continue only
+    // Trakt's watchlist: + where it isn't on it yet (not in Continue: being watched already), - in Watchlist's own tab.
+    if (t === 3) acts.push(['unlist', 'remove', tr('action|Remove from watchlist')]);
+    else if (t !== 2 && !Data.inWatchlist(p)) acts.push(['list', 'add', tr('details|Want to watch')]);
+    return acts.concat([Data.isFav(p) ? ['unfav', 'unheart', tr('action|Unfavorite')] : ['fav', 'heart', tr('action|Favorite')],
+      ['trash', 'trash', tr('action|Delete')]]);
   }
 
+  /**
+   * Under the posters, at the screen's left edge (not the poster's): the focused title's name and line, and right of
+   * them its buttons.
+   */
   function renderActions() {
+    var info = $('info');
+    if (!info) {
+      info = el('div', '', $('cards').parentNode);
+      info.id = 'info';
+      el('div', 'name', info);
+      el('div', 'meta', info);
+    }
     var old = $('actions');
-    if (old) { setClass(old.parentNode, 'withacts', false); old.parentNode.removeChild(old); }
-    var acts = (st.zone === Z.CARDS || st.zone === Z.ACT) ? actionsFor() : [], card = $('cards').children[st.card];
-    if (!acts.length || !card) { if (st.zone === Z.ACT) st.zone = Z.CARDS; return; }
-    // At the poster's left edge, under it; its name and line move right of them (.withacts).
-    var box = el('div', '', card);
+    if (old) old.parentNode.removeChild(old);
+    var p = cards[st.card], shown = (st.zone === Z.CARDS || st.zone === Z.ACT) && p && !p.more;
+    setClass(info, 'on', !!shown);
+    if (!shown) { if (st.zone === Z.ACT) st.zone = Z.CARDS; return; }
+    var name = info.firstChild, meta = info.lastChild;
+    name.textContent = p.title || '';
+    meta.textContent = p.meta || '';
+    var acts = actionsFor();
+    if (!acts.length) { if (st.zone === Z.ACT) st.zone = Z.CARDS; return; }
+    var box = el('div', '', info);
     box.id = 'actions';
-    setClass(card, 'withacts', true);
+    box.style.left = (Math.max(name.offsetWidth, meta.offsetWidth) + 36) + 'px';
     for (var i = 0; i < acts.length; i++) {
       var b = el('div', 'act' + (st.zone === Z.ACT && st.act === i ? ' focus' : ''), box), m = el('span', 'mark', b);
       m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + acts[i][1] + '.svg)';
@@ -875,11 +904,149 @@
     }
   }
 
+  // MARK: - A title's page, as a modal over the screen: its photo, name, year, genres, length and score, the overview,
+  // the cast with their photos and who directed or created it. The X at the top right has the focus; it, or Back,
+  // closes it, back on the button that opened it.
+
+  // The page: its photo darkened behind; at the left its poster (RPDB's, with the scores), right of it the name, the line
+  // and the overview across the rest of the width; under them who made it and the cast, and under those the related
+  // titles in a row. The focus: row 0 the top right (Back once a page was opened from another, then the X, focused
+  // first), row 1 the related posters.
+  var detailSeq = 0, detailStack = [], df = {row: 0, i: 0}, detailRelated = [];
+
+  function openDetails(p, push) {
+    if (!push) detailStack = [];
+    detailStack.push(p);
+    df = {row: 0, i: detailTop().length - 1};   // the X
+    renderDetail();
+    st.zone = Z.DETAIL;
+    updateFocus();
+  }
+
+  function detailTop() {
+    var out = [];
+    if (detailStack.length > 1) out.push(['back', 'back', tr('details|Back')]);
+    out.push(['close', 'close', tr('details|Close')]);
+    return out;
+  }
+
+  function renderDetail() {
+    var p = detailStack[detailStack.length - 1], d = $('detail');
+    if (!d) { d = el('div', 'layer', $('stage')); d.id = 'detail'; }
+    d.innerHTML = '';
+    var back = el('div', 'back', d);
+    if (p.backdrop) back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w1280') + ')';
+    el('div', 'shade', d);
+    var top = detailTop();
+    for (var t = 0; t < top.length; t++) {
+      var x = el('div', 'close d-top', d), m = el('span', 'mark', x);
+      x.style.left = (1772 - 92 * (top.length - 1 - t)) + 'px';
+      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + top[t][1] + '.svg)';
+      el('div', 'tip', x, top[t][2]);
+    }
+    var art = Data.poster(p, 'w500') || (p.poster ? Data.image(p.poster, 'w500') : '');
+    var poster = el('div', 'd-poster', d);
+    if (art) { poster.style.backgroundImage = 'url(' + art + ')'; if (CONFIG.rpdbKey) poster.style.backgroundPosition = '50% 100%'; }
+    var box = el('div', 'box', d);
+    // d- names: the settings' and All Apps' rules use title, row, head and face.
+    el('div', 'd-title', box, p.title || '');
+    var line = el('div', 'd-line', box, p.meta || '');
+    var text = el('div', 'd-text', box, '');
+    var people = el('div', 'd-people', d);
+    var rel = el('div', 'd-rel', d);
+    setClass(d, 'open', true);
+    detailRelated = [];
+    var seq = ++detailSeq;
+    Data.fullDetails(p, function (info) {
+      if (seq !== detailSeq || !info) return;
+      var bits = [];
+      if (info.year) bits.push(info.year);
+      if (info.genres.length) bits.push(info.genres.join(', '));
+      if (info.length) bits.push(info.length);
+      line.textContent = bits.join(' · ');
+      text.textContent = info.overview;
+      setClass(text, 'short', box.firstChild.offsetHeight > 90);   // a name in two lines: a line less of overview
+      if (info.people.length) {
+        el('div', 'd-relhead', people, tr('details|Cast'));
+        var row = el('div', 'd-row', people);
+        for (var i = 0; i < info.people.length; i++) {
+          var c = info.people[i], who = el('div', 'd-who' + (c.maker ? ' maker' : ''), row), face = el('div', 'd-face', who);
+          if (c.photo) face.style.backgroundImage = 'url(' + c.photo + ')';
+          else face.textContent = String(c.name).charAt(0);
+          el('div', 'd-nm', who, c.name);
+          el('div', 'd-rl', who, c.role);
+        }
+      }
+    });
+    Data.related(p, function (list) {
+      if (seq !== detailSeq || !list.length) return;
+      detailRelated = list.slice(0, 11);
+      el('div', 'd-relhead', rel, tr('details|More like this'));
+      var row = el('div', 'd-relrow', rel);
+      for (var i = 0; i < detailRelated.length; i++) {
+        // TMDB's plain posters: RPDB's scores are too small to read at this size
+        el('div', 'd-relcard', row).style.backgroundImage = 'url(' + Data.image(detailRelated[i].poster, 'w185') + ')';
+      }
+      updateDetailFocus();
+    });
+    updateDetailFocus();
+  }
+
+  function updateDetailFocus() {
+    var d = $('detail');
+    if (!d) return;
+    var rows = [d.querySelectorAll('.d-top'), d.querySelectorAll('.d-relcard')];
+    for (var r = 0; r < rows.length; r++) {
+      for (var i = 0; i < rows[r].length; i++) setClass(rows[r][i], 'focus', st.zone === Z.DETAIL && df.row === r && df.i === i);
+    }
+  }
+
+  function detailMove(dx, dy) {
+    var counts = [detailTop().length, detailRelated.length];
+    if (dx) df.i = Math.max(0, Math.min(counts[df.row] - 1, df.i + dx));
+    else if (dy > 0 && df.row === 0 && counts[1]) { df.row = 1; df.i = 0; }
+    else if (dy < 0 && df.row === 1) { df.row = 0; df.i = counts[0] - 1; }
+    updateDetailFocus();
+  }
+
+  function detailActivate() {
+    if (df.row === 1) { if (detailRelated[df.i]) openDetails(detailRelated[df.i], true); return; }
+    if (detailTop()[df.i][0] === 'back') detailBack(); else closeDetails();
+  }
+
+  /** Back on a page: the page opened before, then the screen. */
+  function detailBack() {
+    if (detailStack.length > 1) {
+      detailStack.pop();
+      var p = detailStack.pop();
+      openDetails(p, true);
+      return;
+    }
+    closeDetails();
+  }
+
+  function closeDetails() {
+    detailSeq++;
+    detailStack = [];
+    setClass($('detail'), 'open', false);
+    st.zone = Z.ACT;
+    st.act = 0;   // back on the eye
+    updateFocus();
+  }
+
   /** The action on the focused title; where it leaves this tab, the next one takes the focus (on its poster). */
   function doAction(what) {
     var p = cards[st.card];
     if (!p) return;
-    Data.mark(p, what);
+    if (what === 'details') { openDetails(p); return; }
+    function failed(err) { if (err) toast(trf("trakt|Trakt didn't take it: {error}", {error: err.message})); }
+    if (what === 'list' || what === 'unlist') {
+      Data.setWatchlist(p, what === 'list', failed);
+    } else if (what === 'watched' || what === 'drop') {
+      Data.traktMark(p, what, failed);
+    } else {
+      Data.mark(p, what);
+    }
     cards = [];
     renderCards();
     if (!cards[st.card] || cards[st.card].id !== p.id) st.zone = Z.CARDS;
@@ -1780,6 +1947,32 @@
   }
 
   /** The app a pick opens in, as a small mark at its poster's top right (its glyph, else its name's first letter). */
+  /**
+   * A pick opened: begun on Trakt (Data.started), then its app, on the title's page when Watchmode knows it. On none of
+   * the TV's apps by TMDB, Watchmode is asked first whether one of them has it; else Stremio.
+   */
+  function openPick(pick, target) {
+    Data.started(pick);
+    if (target.params && !(stremio() && target.app === stremio())) { launcher(target.app.id, target.app.title, target.params)(); return; }
+    if (stremio() && target.app === stremio()) {
+      Data.serviceFor(pick, function (found) {
+        if (found) launcher(found.app.id, found.app.title, {link: found.link})();
+        else launcher(target.app.id, target.app.title, target.params)();
+      });
+      return;
+    }
+    Data.titleLink(pick, function (link) { launcher(target.app.id, target.app.title, link ? {link: link} : null)(); });
+  }
+
+  /** Continue's date for a show's coming episode: a small calendar at the poster's top left, dd/mm. */
+  function airBadge(p, img) {
+    var at = dataTab() === 2 && Data.nextAiring(p);
+    if (!at) return;
+    var d = new Date(at), b = el('div', 'airs', img), m = el('span', 'mark', b);
+    m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-calendar.svg)';
+    el('span', 'day', b, ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2));
+  }
+
   function badge(p, img) {
     var t = pickTarget(p);
     if (!t) return;
@@ -1832,9 +2025,7 @@
         if (pick && pick.more) { startMore(); return; }
         var target = pickTarget(pick);
         if (!target) return;
-        if (target.params) { launcher(target.app.id, target.app.title, target.params)(); return; }
-        // On the title's own page when Watchmode knows it (watchmode_key), else the app's home as before.
-        Data.titleLink(pick, function (link) { launcher(target.app.id, target.app.title, link ? {link: link} : null)(); });
+        openPick(pick, target);
         return;
       case Z.SHELF:
         if (shelf[st.shelf] && shelf[st.shelf].allApps) openDrawer();
@@ -1851,6 +2042,9 @@
         return;
       case Z.SPIDER:
         springHold();
+        return;
+      case Z.DETAIL:
+        detailActivate();
         return;
       case Z.APPS:
         if (apps[st.grid]) launcher(apps[st.grid].id, apps[st.grid].title)();
@@ -1980,6 +2174,9 @@
           else st.zone = Z.SHELF;
         }
         break;
+      case Z.DETAIL:
+        detailMove(dx, dy);
+        return;
       case Z.SPIDER:
         if (dy < 0) st.zone = hasSubs() ? Z.SUB : Z.TOP;
         else if (dy > 0 && shelf.length) st.zone = Z.SHELF;
@@ -2041,6 +2238,7 @@
   }
 
   function back() {
+    if (st.zone === Z.DETAIL) { closeDetails(); return; }   // the page closes (its own Back button goes to the page before)
     if (st.zone === Z.EDIT) {
       setClass($('shelfedit'), 'open', false);
       openSettings();
@@ -2063,7 +2261,7 @@
   /** The pointer focuses what it's over (the Magic Remote, or a mouse when previewing). */
   function hover(node, zone, index) {
     node.onmouseover = function () {
-      if (saverOn || (sheetOpen() !== (zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.CITY || zone === Z.KEY || zone === Z.ABOUT))) return;
+      if (saverOn || (sheetOpen() !== (zone === Z.DETAIL || zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.CITY || zone === Z.KEY || zone === Z.ABOUT))) return;
       if (zone === Z.DRAWER && st.zone !== Z.DRAWER) return;
       if (zone !== Z.DRAWER && st.zone === Z.DRAWER && zone !== Z.SHELF) return;
       if (zone === Z.TOP && index < tabsN() && !Data.hasKey()) return;   // the tabs are hidden without the picks
@@ -2204,6 +2402,7 @@
     el('div', 'clock', shift);
     el('div', 'date', shift);
     var side = el('div', 'side', shift);
+    hangSpider(el('div', 'clip amb-spider', a));   // the itsy bitsy spider, hanging on the right
     el('div', 'temp', side);
     el('div', 'cond', side);
     ambientOn = true;
@@ -2380,6 +2579,7 @@
     hideAmbient();
     if (document.hidden) return;
     idleAt = Date.now();
+    TV.noteChannel();   // back from the viewer: the antenna channel it played, for Live TV
     reset();   // back from another app: the same start as opening it
     loadApps(function () { renderTop(); renderShelf(); renderDrawer(); updateFocus(); Data.refresh(); });
   });
