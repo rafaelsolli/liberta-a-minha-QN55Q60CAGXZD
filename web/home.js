@@ -490,7 +490,7 @@
     if (st.zone === Z.SPIDER && !spiderShown()) st.zone = cards.length ? Z.CARDS : Z.SHELF;
     setClass($('empty'), 'focus', st.zone === Z.SPIDER);
     // The search field shrinks back into the magnifier when the focus leaves it (its results stay).
-    if (searchOpen && st.zone !== Z.SEARCH) {
+    if (searchOpen && st.zone !== Z.SEARCH && !(railMode() && st.zone === Z.TOP && st.top === tabsN())) {
       searchOpen = false;
       closeField('searchbar');
       // It closes as it was, white and solid (and the magnifier dark on it) until it's gone: retracts, then shrinks.
@@ -557,9 +557,9 @@
   /** Where every entry lands: Explore (Trakt's, or the first tab without it). */
   function startTab() { return railMode() ? 0 : Trakt.signedIn() ? 1 : 0; }   // with the rail: Home, the shortcuts
   /** With the rail, only Home has the shelf: the other sections are the catalog. */
-  function catalog() { return railMode() && dataTab() !== 'fav' && !searchMode; }
+  function catalog() { return railMode() && (dataTab() !== 'fav' || searchMode || searchOpen); }   // searching too
   /** Home with the rail: the shortcuts, the apps on top and the favorites under them (never the spider). */
-  function homeView() { return railMode() && dataTab() === 'fav' && !searchMode; }
+  function homeView() { return railMode() && dataTab() === 'fav' && !searchMode && !searchOpen; }
 
   // With Trakt, each tab has sub-tabs under it: All, Movies, Shows (st.sub). Without, the tabs are the kinds already.
   var SUB_KIND = [null, 'movie', 'tv'];
@@ -569,6 +569,9 @@
   // top, the section's name and what's in it, and at the right its dropdowns (kind, genre, order) and Clear.
 
   function railMode() { return Trakt.signedIn() && Data.hasKey(); }
+  var railTimer = 0, RAIL_REST = 160;
+  /** The section the heading names: the one the rail's focus is on, drawn or about to be. */
+  function shownTab() { return st.zone === Z.TOP && st.top < tabsN() && railMode() ? TRAKT_TABS[st.top] : dataTab(); }
   var RAIL_X = 184;   // where the posters, the heading and the title's line start with the rail
   var RAIL_ICONS = {fav: 'home', 0: 'explore', 1: 'discover', 2: 'continue', 3: 'watchlist', 4: 'rewatch', trash: 'trash'};
 
@@ -624,8 +627,8 @@
   /** The heading's name and line: the section's, or Search's while searching. */
   function renderHeading() {
     if (!railMode()) return;
-    var name = searchMode || searchOpen ? tr('rail|Search') : sectionName(dataTab());
-    var about = searchMode || searchOpen ? tr('section|Movies and shows on TMDB') : sectionAbout(dataTab());
+    var name = searchMode || searchOpen ? tr('rail|Search') : sectionName(shownTab());
+    var about = searchMode || searchOpen ? '' : sectionAbout(shownTab());   // searching: no line, only the field
     if ($('title').textContent !== name) $('title').textContent = name;
     var sub = $('subtitle');
     if (!sub) { sub = el('div', '', $('title').parentNode); sub.id = 'subtitle'; }
@@ -794,7 +797,12 @@
       field.setAttribute('aria-label', tr('Search'));
       field.setAttribute('autocomplete', 'off');
       field.setAttribute('spellcheck', 'false');
-      field.oninput = function () { searchText = field.value; };
+      field.oninput = function () {
+        searchText = field.value;
+        // As it's typed (the rail's Search): once the typing rests, the results come, the keyboard still up.
+        clearTimeout(liveTimer);
+        if (railMode()) liveTimer = setTimeout(liveSearch, LIVE_REST);
+      };
       hover(bar, Z.SEARCH, 0);
     }
     var input = bar.querySelector('input');
@@ -804,13 +812,17 @@
     setClass(body, 'searching', searchOpen);
   }
 
-  function openSearch() {
+  /** quiet: the rail resting on Search, its page shown with the focus left on the rail (▶ or OK goes into the field). */
+  function openSearch(quiet) {
     clearTimeout(searchCloseTimer);
+    if (railMode() && !searchMode) { searchResults = []; cards = []; }   // the grid empty until results come
     setClass($('searchbar'), 'closing', false);
     setClass(body, 'searchclosing', false);
     searchOpen = true;
+    if (quiet === true) { renderTop(); if (railMode()) renderCards(); updateFocus(); return; }
+    st.zone = Z.SEARCH;   // first: a redraw with the focus elsewhere would close the field again
     renderTop();
-    st.zone = Z.SEARCH;
+    if (railMode()) renderCards();
     updateFocus();
     // The keyboard once the field has grown out of the magnifier (renderSearchBar's animation takes 0.48 s).
     setTimeout(function () { if (searchOpen && st.zone === Z.SEARCH) openField('searchbar'); }, 480);
@@ -826,11 +838,38 @@
     renderTop();
     st.zone = Z.TOP;
     st.top = tabsN();   // back on the magnifier
-    if (was) { cards = []; renderCards(); }
+    if (was || railMode()) { cards = []; renderCards(); }   // the rail's Search had its own grid: the section's again
     updateFocus();
   }
 
+  var liveTimer = 0, LIVE_REST = 600, LIVE_MIN = 2;
+
+  /**
+   * A search while typing: 2 letters at least, the field and its keyboard left open, the focus left in it; the last
+   * results stay until the new ones come (a newer search wins, as for OK's).
+   */
+  function liveSearch() {
+    var q = searchText.trim();
+    if (!searchOpen || st.zone !== Z.SEARCH) return;
+    if (q.length < LIVE_MIN) {
+      if (searchMode) { searchSeq++; searchMode = false; searchResults = []; cards = []; renderCards(); }
+      return;
+    }
+    var seq = ++searchSeq;
+    searchMode = true;
+    Data.search(q, function (err, list, finished) {
+      if (seq !== searchSeq) return;
+      if (!list.length && !finished && !err) return;   // keep the last results until some come
+      searchResults = list;
+      searchStatus = err ? trf("Couldn't search now: {error}", {error: err.message}) : finished && !list.length ? tr('Nothing') : '';
+      cards = [];
+      renderCards();
+      updateFocus();
+    });
+  }
+
   function runSearch() {
+    clearTimeout(liveTimer);
     var q = searchText.trim();
     closeField('searchbar');
     if (!q) { openField('searchbar'); return; }
@@ -865,12 +904,19 @@
   // MARK: - Picks and background
 
   function renderCards() {
-    var list = searchMode ? searchResults : Data.tabPicks(dataTab(), Trakt.signedIn() ? SUB_KIND[st.sub || 0] : TAB_KIND[st.tab], st.genre || 0, sortArg());
-    // More of the tab on Trakt than it shows: an arrow ends the row, and OK on it brings 20 more (Data.more).
-    if (!searchMode && Data.hasMore(dataTab())) list = list.concat([{id: 'more', kind: '', title: '', backdrop: '', meta: '', more: true}]);
+    if (railMode()) Data.setPage(gridCols() * 4);   // pages of whole rows: no row left broken
+    var searching = searchMode || (railMode() && searchOpen);   // the rail's Search: its own (empty) grid from the start
+    var list = searching ? searchResults : Data.tabPicks(dataTab(), Trakt.signedIn() ? SUB_KIND[st.sub || 0] : TAB_KIND[st.tab], st.genre || 0, sortArg());
+    // More of the tab on Trakt than it shows: an arrow ends the row, and OK on it brings 20 more (Data.more). In the grid,
+    // no arrow: grey places finish the last row and show the next while it comes (more load as the end nears).
+    var growing = !searchMode && Data.hasMore(dataTab());
+    if (growing && !railMode()) list = list.concat([{id: 'more', kind: '', title: '', backdrop: '', meta: '', more: true}]);
     var holder = $('cards');
     setClass(body, 'no-picks', !list.length);
-    renderEmpty(!list.length && !searchMode && !homeView());   // Home empty of favorites: just the apps
+    var skeleton = railMode() && !list.length && !searching && !homeView() && Data.busy();
+    // The grid's grey places: two rows while a section loads; while more may come, its last row finished and one more.
+    var cols = railMode() ? gridCols() : 1, places = skeleton ? cols * 2 : railMode() && list.length && (growing || Data.busy()) && !homeView() ? (cols - list.length % cols) % cols + cols : 0;
+    renderEmpty(!list.length && !searching && !homeView() && !skeleton);   // Home empty of favorites: just the apps
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
     if (!Data.hasKey() && st.zone === Z.TOP && st.top < tabsN()) st.top = tabsN();
     var same = list.length === cards.length;
@@ -878,7 +924,7 @@
     for (var i = 0; same && i < list.length; i++) {
       same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta && marks(list[i]) === cards[i].marks;
     }
-    if (same && holder.children.length === list.length) return;
+    if (same && holder.children.length === list.length + places) return;
     cards = list;
     for (var mk = 0; mk < list.length; mk++) list[mk].marks = marks(list[mk]);   // what Trakt said when drawn
     loadingMore = false;
@@ -914,6 +960,8 @@
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
     }
+    // Still loading: two rows of grey posters where the section's will be (not focusable: cards stays empty).
+    for (var sk = 0; sk < places; sk++) el('div', 'card skel', holder);
     st.card = Math.min(st.card, Math.max(0, list.length - 1));
     if (!list.length && st.zone === Z.CARDS) st.zone = Z.SHELF;
     if (list.length && !list[st.card].more) backdrop(Data.image(list[st.card].backdrop, 'w300'));
@@ -1205,6 +1253,9 @@
     if (p.person) { renderPerson(d, p); return; }
     var people = el('div', 'd-people', d);
     var rel = el('div', 'd-rel', d);
+    skelText(text);
+    skelRow(people, 'face', 9);
+    skelRow(rel, 'poster', 10);
     setClass(d, 'open', true);
     detailRelated = [];
     var seq = ++detailSeq;
@@ -1220,6 +1271,7 @@
       line.textContent = bits.join(' · ');
       text.textContent = info.overview;
       setClass(text, 'short', box.firstChild.offsetHeight > 90);   // a name in two lines: a line less of overview
+      people.innerHTML = '';
       if (info.people.length) {
         castRow.head = el('div', 'd-relhead', people, tr('details|Cast'));
         castRow.items = info.people;   // OK on one: their page
@@ -1238,7 +1290,9 @@
       }
     });
     Data.related(p, function (list) {
-      if (seq !== detailSeq || !list.length) return;
+      if (seq !== detailSeq) return;
+      rel.innerHTML = '';
+      if (!list.length) return;
       detailRelated = list.slice(0, 12);
       relRow.items = detailRelated;
       relRow.head = el('div', 'd-relhead', rel, tr('details|More like this'));
@@ -1284,6 +1338,19 @@
   // MARK: - A person's page (OK on someone in a cast): their photo, who they are and their story; their films newest
   // first in a row that pages 20 at a time; the people they work with most. Only Back and the X on top.
 
+  /** Grey bars where text will come (an overview, a biography). */
+  function skelText(box) {
+    box.innerHTML = '';
+    for (var i = 0; i < 4; i++) el('div', 'skel-line', box).style.width = (i === 3 ? 58 : 100 - i * 6) + '%';
+  }
+
+  /** A row's head and its grey places (faces or posters) until its items come. */
+  function skelRow(box, kind, n) {
+    el('div', 'd-relhead skel-head', box);
+    var row = el('div', 'd-row skel-row', box);
+    for (var i = 0; i < n; i++) el('div', 'skel-' + kind, row);
+  }
+
   function openPerson(c) { if (c && c.id) openDetails({person: true, id: c.id, kind: 'person', title: c.name, photo: c.photo || ''}, true); }
 
   var FILM_STEP = 132, FILMS_PAGE = 20;   // a film's poster (112) and its gap; how many come at a time
@@ -1295,32 +1362,48 @@
     el('div', 'd-title', box, p.title || '');
     var line = el('div', 'd-line', box, ''), text = el('div', 'd-text', box, '');
     var filmsBox = el('div', 'd-people d-films', d), rel = el('div', 'd-rel d-relpeople', d);
+    el('div', 'skel-line short', line);
+    skelText(text);
+    skelRow(filmsBox, 'poster', 12);
+    skelRow(rel, 'face', 11);
     setClass(d, 'open', true);
     var seq = ++detailSeq, films = [], shown = FILMS_PAGE;
-    var filmRow = {sel: '.d-filmcard', items: [], act: function (x) {
-      if (x.more) { shown += FILMS_PAGE; drawFilms(); updateDetailFocus(); } else openDetails(x, true);
-    }, base: tr('details|Filmography'), label: titleLabel, scroll: function (dd, i) {   // the row slides to keep the focused one on screen
+    var filmRow = {sel: '.d-filmcard', items: [], act: function (x) { openDetails(x, true); },
+      base: tr('details|Filmography'), label: titleLabel, scroll: function (dd, i) {
+      // Four from the end, the next ones come (no arrow to press); they're all at hand, so nothing waits.
+      if (i >= filmRow.items.length - 4 && films.length > shown) moreFilms();
+      // The row slides to keep the focused one on screen.
       var r = dd.querySelector('.d-filmrow');
       if (r) r.style.webkitTransform = r.style.transform = 'translateX(' + (-Math.max(0, i - 10) * FILM_STEP) + 'px)';
     }};
     var peopleRow = {sel: '.d-relpeople .d-who', items: [], act: openPerson, base: tr('details|Related people'), label: personLabel};
     detailRows = [filmRow, peopleRow];
+    var filmEl = null;
+    function filmCard(f) {
+      var c = el('div', 'd-filmcard', filmEl);
+      c.style.backgroundImage = 'url(' + Data.image(f.poster, 'w185') + ')';
+      if (Trakt.signedIn() && Data.watched(f)) { setClass(c, 'seen', true); el('div', 'dim', c); }
+    }
     function drawFilms() {
       filmsBox.innerHTML = '';
       if (!films.length) return;
       filmRow.head = el('div', 'd-relhead', filmsBox, tr('details|Filmography'));
-      var clip = el('div', 'd-filmclip', filmsBox), row = el('div', 'd-filmrow', clip);
+      filmEl = el('div', 'd-filmrow', el('div', 'd-filmclip', filmsBox));
       filmRow.items = films.slice(0, shown);
-      if (films.length > shown) filmRow.items.push({more: true});
-      for (var i = 0; i < filmRow.items.length; i++) {
-        var f = filmRow.items[i], c = el('div', 'd-filmcard' + (f.more ? ' more' : ''), row);
-        if (f.more) { sym('chevron_right', c); continue; }
-        c.style.backgroundImage = 'url(' + Data.image(f.poster, 'w185') + ')';
-        if (Trakt.signedIn() && Data.watched(f)) { setClass(c, 'seen', true); el('div', 'dim', c); }
-      }
+      for (var i = 0; i < filmRow.items.length; i++) filmCard(filmRow.items[i]);
     }
+    /** The next ones at the row's end, added to it (the row, its place and the focus stay as they are). */
+    function moreFilms() {
+      var from = filmRow.items.length;
+      shown += FILMS_PAGE;
+      filmRow.items = films.slice(0, shown);
+      for (var i = from; i < filmRow.items.length; i++) filmCard(filmRow.items[i]);
+    }
+
     Data.person(p.id, function (info) {
-      if (seq !== detailSeq || !info) return;
+      if (seq !== detailSeq) return;
+      if (!info) { text.innerHTML = ''; line.innerHTML = ''; filmsBox.innerHTML = ''; rel.innerHTML = ''; return; }
+      line.innerHTML = '';
       if (info.photo) poster.style.backgroundImage = 'url(' + info.photo + ')';
       var bits = [], dept = {Acting: tr('dept|Acting'), Directing: tr('dept|Directing'), Writing: tr('dept|Writing'), Production: tr('dept|Production')};
       if (info.dept) bits.push(dept[info.dept] || info.dept);
@@ -1339,7 +1422,9 @@
       drawFilms();
       updateDetailFocus();
       Data.relatedPeople(info, function (list) {
-        if (seq !== detailSeq || !list.length) return;
+        if (seq !== detailSeq) return;
+        rel.innerHTML = '';
+        if (!list.length) return;
         peopleRow.head = el('div', 'd-relhead', rel, tr('details|Related people'));
         var r = el('div', 'd-row', rel);
         peopleRow.items = list;
@@ -2670,6 +2755,8 @@
     }
     switch (st.zone) {
       case Z.TOP:
+        if (dx > 0 && st.top < tabsN() && st.top !== st.tab) { clearTimeout(railTimer); selectTab(st.top); }   // ▶ before it rested
+        if (dx > 0 && st.top === tabsN() && topItems[0] && topItems[0][2] === openSearch && !searchMode) { clearTimeout(railTimer); openSearch(); return true; }   // into the field
         order = railOrder();
         at = order.indexOf(st.top);
         if (dy) {
@@ -2677,7 +2764,16 @@
           if (to < tabsN() && (searchMode || searchOpen)) closeSearch();   // it puts the focus on Search: set it after
           st.top = to;
           st.zone = Z.TOP;
-          if (to < tabsN()) selectTab(to);
+          // The section is drawn once the focus rests on it (RAIL_REST): going down the rail never waits for one.
+          clearTimeout(railTimer);
+          if (to === tabsN() && topItems[0] && topItems[0][2] === openSearch) railTimer = setTimeout(function () {
+            if (st.zone === Z.TOP && st.top === to && !searchOpen) openSearch(true);   // its page, as a section's: the field, no keyboard yet
+          }, RAIL_REST);
+          if (to < tabsN()) railTimer = setTimeout(function () {
+            if (st.zone !== Z.TOP || st.top !== to) return;
+            if (to === st.tab) { cards = []; renderCards(); } else selectTab(to);   // the same section (after Search): drawn again
+            updateFocus();
+          }, RAIL_REST);
         } else if (dx > 0) {
           if (cards.length) st.zone = Z.CARDS;
           else if (!searchMode) { st.zone = Z.SUB; st.dd = 0; }
@@ -2710,7 +2806,9 @@
         if (dy < 0 && !cards.length && !spiderShown()) { st.zone = Z.TOP; st.top = st.tab; return true; }
         return false;
       case Z.SEARCH:
-        if (dx < 0) { closeField('searchbar'); st.zone = Z.TOP; st.top = tabsN(); return true; }
+        if (dx < 0) { closeSearch(); return true; }   // to the rail, on Search: the section's grid back
+        if (dy > 0) { if (cards.length) { closeField('searchbar'); st.zone = Z.CARDS; st.card = 0; } return true; }   // to the results, if any
+        if (dy < 0) return true;
         return false;
     }
     return false;
@@ -3053,6 +3151,8 @@
     if (k === TV.keys.ok || k === 65376) { if (st.zone === Z.CITY) searchCity(); else if (st.zone === Z.SEARCH) runSearch(); else saveKey(); }
     else if (k === TV.keys.back || k === 27 || k === 65385) { closeField(sheet); if (st.zone === Z.SEARCH) closeSearch(); updateFocus(); }
     else if (k === TV.keys.up || k === TV.keys.down) { closeField(sheet); move(0, k === TV.keys.up ? -1 : 1); }
+    // The rail's Search: ◀ at the text's start goes back to the rail (the search closes).
+    else if (k === TV.keys.left && st.zone === Z.SEARCH && railMode() && fieldOf(sheet).selectionStart === 0) { closeSearch(); return true; }
     return true;   // anything else types into the field
   }
 

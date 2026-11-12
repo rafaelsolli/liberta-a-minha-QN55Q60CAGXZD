@@ -845,7 +845,7 @@ var Data = (function () {
   // -3: kept from before the picks knew their genres (the genre sub-tabs), they're detailed again.
   var tk = stored('trakt-picks-3') || {lists: null, at: 0, pool: {}}, fetchingTrakt = false, detailingTrakt = false, detailAgain = false;
 
-  function saveTrakt() { store('trakt-picks-3', tk); }
+  function saveTrakt() { candVer++; store('trakt-picks-3', tk); }
 
   function traktPick(key, note) {
     var p = tk.pool[key];
@@ -919,7 +919,18 @@ var Data = (function () {
 
   /** A tab's titles for a filter, in its order: what isn't deleted, of the kind, of the genre (or maybe), and for
    * Explore and Discover not watched yet. */
+  /**
+   * A tab's candidates, kept per filter until something changes (candVer: the lists, a mark, details, a Trakt list
+   * fetched): with a long history the filter, the order and the genres take time, and a screen asks several times.
+   */
+  var candCache = {}, candAt = -1, candVer = 0;
   function candidates(tab, kind, genre, sort) {
+    if (candAt !== candVer) { candCache = {}; candAt = candVer; }
+    var ck = tab + '|' + kind + '|' + (genre || 0) + '|' + (sort || '');
+    return candCache[ck] || (candCache[ck] = candidatesNow(tab, kind, genre, sort));
+  }
+
+  function candidatesNow(tab, kind, genre, sort) {
     // sort: an order (sortKeys), '-' first for the other way round (the A→Z button), Explore's source too.
     var rev = String(sort || '').charAt(0) === '-', by = rev ? sort.slice(1) : sort || '';
     var L = tk.lists, G = GENRES[genre || 0], keys = sortKeys(tabKeys(tab, genre, by), tab, by), out = [];
@@ -974,6 +985,7 @@ var Data = (function () {
         Trakt.trending(genre ? GENRES[genre].trakt : null, function (err, keys, genres, meta) {
           if (err) { hotAsked[id] = false; return; }
           hotBy[id] = keys;
+          candVer++;
           for (var k in genres) if (Object.prototype.hasOwnProperty.call(genres, k)) L.genres[k] = genres[k];
           for (var m in meta) if (Object.prototype.hasOwnProperty.call(meta, m)) hotMeta[m] = meta[m];
           detailTrakt();
@@ -1030,16 +1042,19 @@ var Data = (function () {
     if (detailingTrakt) { detailAgain = true; return; }   // more asked meanwhile: once this round ends
     if (!tk.lists) return;
     var todo = [];
-    function take(tab, kind, genre, sort) {
-      var keys = candidates(tab, kind, genre, sort), n = 0, G = GENRES[genre || 0];
-      for (var j = 0; j < keys.length && n < shownN[tab]; j++) {
+    // ahead: the view's next page too, detailed behind its shown one, so it's there at once when the grid reaches it.
+    function take(tab, kind, genre, sort, ahead) {
+      var keys = candidates(tab, kind, genre, sort), n = 0, G = GENRES[genre || 0], want = shownN[tab] + (ahead ? TAB_STEP : 0);
+      for (var j = 0; j < keys.length && n < want; j++) {
         var p = traktPick(keys[j], '');
         if ((!p.detailed || needsImdb(p) || p.mv !== META_V) && todo.indexOf(p) < 0) todo.push(p);
         if (keyInGenre(keys[j], G) !== false) n++;
       }
     }
-    if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre, view.sort);
-    for (var t = 0; t < 5; t++) take(t, null, 0);
+    if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre, view.sort, false);
+    for (var t0 = 0; t0 < 5; t0++) take(t0, null, 0, '', false);   // every tab's first page (the view's first of all)
+    if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre, view.sort, true);   // then the view's next one
+    // (each tab's first page is queued above, before the view's next one)
     if (!todo.length) { changed(); return; }
     detailingTrakt = true;
     var gen = detailGen, done = 0;
@@ -1182,6 +1197,7 @@ var Data = (function () {
 
   /** what: 'fav', 'unfav', 'trash' (it leaves the favorites too) or 'restore'. */
   function mark(p, what) {
+    candVer++;
     var k = markKey(p);
     if (what === 'fav') { marks.fav[k] = snapshot(p); delete marks.trash[k]; }
     else if (what === 'unfav') delete marks.fav[k];
@@ -1262,6 +1278,16 @@ var Data = (function () {
     /** Whether a tab has more than it shows (its last card is then an arrow for 20 more). */
     hasMore: function (tab) { return Trakt.signedIn() && typeof tab === 'number' && !!moreLeft[tab]; },
     /** 20 more of a tab: their details come, and the row grows. */
+    /**
+     * The grid's page: a whole number of its rows (24 for 6 columns), so a page ends on a full row. Pages already
+     * opened keep their count, rounded up to it.
+     */
+    setPage: function (n) {
+      if (!(n > 0) || n === TAB_STEP) return;
+      TAB_STEP = n;
+      for (var t = 0; t < shownN.length; t++) shownN[t] = Math.max(n, Math.ceil(shownN[t] / n) * n);
+      candVer++;
+    },
     more: function (tab) {
       if (typeof tab !== 'number') return;
       shownN[tab] += TAB_STEP;
@@ -1486,7 +1512,7 @@ var Trakt = (function () {
 
   function load() { try { return JSON.parse(localStorage.getItem('fmtv.trakt')) || {}; } catch (e) { return {}; } }
   function save(v) { try { localStorage.setItem('fmtv.trakt', JSON.stringify(v)); } catch (e) {} }
-  function changed() { for (var i = 0; i < listeners.length; i++) listeners[i](); }
+  function changed() { candVer++; for (var i = 0; i < listeners.length; i++) listeners[i](); }   // what a list holds may differ
 
   /** SHA-256 of an ASCII string, as bytes (ES5 has no crypto.subtle on old TVs; only the PKCE challenge needs it). */
   function sha256(text) {

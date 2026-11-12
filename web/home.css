@@ -1427,3 +1427,36 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 
 /* Each row's head stays where it is; its pictures come 12 lower, for more room between the two. */
 #detail .d-relhead { margin-bottom: 22px; }
+
+/* A section still loading: its grid's places, grey, breathing (only opacity animates). */
+.card.skel { border-radius: 14px; background: rgba(255, 255, 255, 0.08); -webkit-animation: skel 1.4s ease-in-out infinite; animation: skel 1.4s ease-in-out infinite; }
+.card.skel:nth-child(2n) { -webkit-animation-delay: 0.2s; animation-delay: 0.2s; }
+.card.skel:nth-child(3n) { -webkit-animation-delay: 0.4s; animation-delay: 0.4s; }
+@-webkit-keyframes skel { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+@keyframes skel { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* The films' row: room inside its clip for the focused poster's ring and lift, at the first one too. */
+#detail .d-filmclip { margin: -10px 0 0 -10px; padding: 10px 0 0 10px; height: 196px; }
+
+/* Grey places while a page's text and rows come (only opacity animates). */
+.skel-line, .skel-head, .skel-face, .skel-poster { background: rgba(255, 255, 255, 0.1); -webkit-animation: skel 1.4s ease-in-out infinite; animation: skel 1.4s ease-in-out infinite; }
+.skel-line { height: 26px; margin: 0 0 14px 0; border-radius: 13px; }
+.skel-line.short { display: inline-block; width: 420px; height: 24px; margin: 0; }
+#detail .skel-head { width: 220px; height: 22px; border-radius: 11px; }
+#detail .skel-row { white-space: nowrap; }
+.skel-face { display: inline-block; width: 96px; height: 96px; margin-right: 24px; border-radius: 48px; }
+.skel-poster { display: inline-block; width: 112px; height: 168px; margin-right: 20px; border-radius: 10px; }
+
+/* The rail's Search: its field where the dropdowns are (Search has none), as wide as their row (274 + 306 + 398 + 56
+   and the gaps between: 1070, ending at 1840), as tall, the same plate and colors; it simply shows, no animation. */
+.rail .searchbar { left: 770px; top: 66px; width: 1070px; height: 56px; border-radius: 28px; -webkit-transform: none; transform: none;
+  -webkit-transition: none; transition: none; }
+.rail .searchbar.open { -webkit-transition: none; transition: none; }
+.rail .searchbar .fill, .rail .searchbar.open .fill { width: 100%; height: 56px; border-radius: 28px; -webkit-transform: none; transform: none;
+  background-color: rgba(0, 0, 0, 0.06); -webkit-transition: background-color 0.15s; transition: background-color 0.15s; }
+.night.rail .searchbar .fill, .rail.night .searchbar .fill { background-color: rgba(255, 255, 255, 0.12); }
+.rail .searchbar.focus .fill, .rail.night .searchbar.focus .fill { background-color: #FFF; }
+.rail .searchbar.closing .fill { -webkit-transition: none; transition: none; }
+.rail .searchbar input, .rail .searchbar.open input { height: 56px; padding: 0 26px; font-size: 25px; font-weight: 600; opacity: 1; -webkit-transition: none; transition: none; }
+/* Narrower: only where the order and its arrow are (398 + 8 + 56), ending at 1840 as they do. */
+.rail .searchbar { left: 1378px; width: 462px; }
