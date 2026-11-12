@@ -475,14 +475,22 @@ var TV = (function () {
 
   /*
    * Samsung's Home button always opens Smart Hub, and no app may take it. So while an app opened from here is in front,
-   * the TV's own server (port 8001) is asked every second whether it still is; once it isn't (Home, or the app closed),
+   * the TV's own server (port 8001) is asked every 0.4 s whether it still is; once it isn't (Home, or the app closed),
    * this app comes back to the front. It stays running behind the app (background-support), which is what lets it ask.
    */
-  var back = {timer: null, ids: [], seen: false, asks: 0};
+  var back = {timer: null, ids: [], seen: false, away: false, asks: 0, asking: false};
 
-  var HUB_IDS = {'org.tizen.netflix-app': '3201907018807', 'org.tizen.primevideo': '3201910019365',
-    'org.tizen.globoplayapp': '3202007021424', 'com.samsung.tv.aria-video': '3201807016597',
-    'org.tizen.browser': '3202010022079', 'com.samsung.tv.gallery': '3201710015037', 'com.samsung.tv.SmartThingsApp': '3202311033054'};
+  // The server answers by an app's Smart Hub number (YouTube's 111299001912), which the app's own APIs never tell. By its
+  // Tizen id it answers too, but for some apps (YouTube, which runs as com.samsung.tv.cobalt-yt) it says "not visible"
+  // even in front, and the built-in ones it doesn't know at all: the number goes first where it's known. `0 vd_applist`
+  // over SDB lists every app's (app_id).
+  var HUB_IDS = {
+    'org.tizen.browser': '3202010022079', 'com.samsung.tv.gallery': '3201710015037', 'com.samsung.tv.SmartThingsApp': '3202311033054',
+    'org.tizen.netflix-app': '3201907018807', 'org.tizen.primevideo': '3201910019365', 'com.samsung.tv.aria-video': '3201807016597',
+    'org.tizen.globoplayapp': '3202007021424', '9Ur5IzDKqV.TizenYouTube': '111299001912', 'MCmYXNxgcu.DisneyPlus': '3201901017640',
+    'rJeHak5zRg.Spotify': '3201606009684', 'GHI3a0zMSx.XboxGamePass': '3202203026799', 'IkWsFHtOY9.Stremio': '3202306031311',
+    'OGLLvqej7u.CrunchyrollWebApp': '3202302030097'
+  };
 
   function stopWatch() {
     if (back.timer) clearInterval(back.timer);
@@ -496,7 +504,7 @@ var TV = (function () {
       if (i >= ids.length) { done(null); return; }
       var x = new XMLHttpRequest(), over = false, id = ids[i++];
       x.open('GET', 'http://127.0.0.1:8001/api/v2/applications/' + encodeURIComponent(id), true);
-      x.timeout = 2500;
+      x.timeout = 1500;
       x.onreadystatechange = function () {
         if (x.readyState !== 4 || over) return;
         over = true;
@@ -511,41 +519,43 @@ var TV = (function () {
     next();
   }
 
+  /** Brings Free My TV to the front. As an app control (the manifest's reload="disable"), the page isn't loaded again. */
   function comeBack() {
     var self = '';
     try { self = window.tizen.application.getCurrentApplication().appInfo.id; } catch (e) {}
     if (!self) return;
+    function launch() { try { window.tizen.application.launch(self); } catch (e) {} }
     try {
-      window.tizen.application.launch(self, null, function () { post('/api/v2/applications/' + self, 5000, null); });
+      var control = new window.tizen.ApplicationControl('http://tizen.org/appcontrol/operation/default', null, null, null, []);
+      window.tizen.application.launchAppControl(control, self, null, launch);
     } catch (e) {
-      post('/api/v2/applications/' + self, 5000, null);
+      launch();
     }
   }
+
 
   function watchBack(id) {
     stopWatch();
     if (!samsung || !id) return;
-    back.ids = [id];
-    // The server knows some apps only by their Smart Hub number (Netflix's 3201907018807): HUB_IDS has this TV's
-    // (`0 vd_applist` over SDB lists each app_id), and the icon's path, where it holds one, tells the others.
-    try {
-      var info = window.tizen.application.getAppInfo(id), hub = /\/(\d{9,})\//.exec(info.iconPath || '');
-      if (hub) back.ids.push(hub[1]);
-      if (info.packageId && info.packageId !== id) back.ids.push(info.packageId);
-    } catch (e) {}
-    if (HUB_IDS[id]) back.ids.push(HUB_IDS[id]);
+    back.ids = HUB_IDS[id] ? [HUB_IDS[id]] : [id];
     back.seen = false;
+    back.away = false;
     back.asks = 0;
+    back.asking = false;
     back.timer = setInterval(function () {
-      if (!document.hidden) { stopWatch(); return; }   // back here already
-      if (++back.asks > 40 && !back.seen) { stopWatch(); return; }   // never came up: nothing to watch
+      if (!document.hidden) { if (back.away) stopWatch(); return; }   // back here (the app may still be opening)
+      back.away = true;
+      if (back.asking) return;   // one question at a time: the TV is slow to answer while Smart Hub opens
+      if (++back.asks > 50 && !back.seen) { stopWatch(); return; }   // it never showed (20 s): nothing to watch
+      back.asking = true;
       visible(back.ids, function (on) {
+        back.asking = false;
         if (!back.timer) return;
         if (on === null) { stopWatch(); return; }   // the TV doesn't know it: leave it be
         if (on === true) { back.seen = true; return; }
         if (on === false && back.seen && document.hidden) { stopWatch(); comeBack(); }
       });
-    }, 1000);
+    }, 400);
   }
 
   // MARK: - The antenna
@@ -831,6 +841,7 @@ var TV = (function () {
       if (samsung) {
         if (id.indexOf('source:') === 0) { stopWatch(); samsungSource(id, done); return; }
         var shown = brewHost[id] || id;   // TizenBrew's modules run in TizenBrew
+        var then = function (ok) { if (ok) watchBack(shown); if (done) done(ok); };
         if (params && params.link) samsungDeepLink(id, params.link, then);
         else samsungLaunch(id, then);
         return;

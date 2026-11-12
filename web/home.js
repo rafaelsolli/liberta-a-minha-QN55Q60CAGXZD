@@ -1029,7 +1029,7 @@
     detailSeq++;
     detailStack = [];
     setClass($('detail'), 'open', false);
-    st.zone = Z.ACT;
+    st.zone = actionsFor().length ? Z.ACT : Z.CARDS;
     st.act = 0;   // back on the eye
     updateFocus();
   }
