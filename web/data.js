@@ -1079,6 +1079,65 @@ var Data = (function () {
 
   /** done(info): {overview, year, genres, length, score, people: [{name, role, photo, maker}]}: who directed (a movie) or
    * created (a show) first, then the cast. */
+  // MARK: - A person's page: who they are, what they made (newest first) and the people they work with most
+
+  var TALK = [10767, 10763];   // TMDB's talk and news shows: appearances as themselves, not their work
+
+  /**
+   * done(info): {name, photo, bio, born, died, place, dept, films: [picks, newest first]}, or done(null). Films are the
+   * person's cast and crew credits with a date and a poster, each title once; the biography in English where TMDB has
+   * none in the TV's language.
+   */
+  function person(id, done) {
+    tmdb('/person/' + id + '?language=' + lang() + '&append_to_response=combined_credits', function (err, o) {
+      if (err || !o) { done(null); return; }
+      var seen = {}, films = [], cc = o.combined_credits || {};
+      function add(c) {
+        var kind = c.media_type === 'tv' ? 'tv' : 'movie', k = kind + ':' + c.id, date = c.release_date || c.first_air_date || '';
+        if (seen[k] || !c.poster_path || !date || deleted({kind: kind, id: c.id})) return;
+        for (var g = 0; c.genre_ids && g < c.genre_ids.length; g++) if (TALK.indexOf(c.genre_ids[g]) >= 0) return;
+        seen[k] = true;
+        films.push({id: c.id, kind: kind, title: kind === 'tv' ? c.name : c.title, poster: c.poster_path, backdrop: c.backdrop_path || '',
+          date: date, votes: c.vote_count || 0, meta: '', app: null});
+      }
+      (cc.cast || []).forEach(add);
+      (cc.crew || []).forEach(add);
+      films.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+      var info = {id: o.id, name: o.name || '', photo: o.profile_path ? 'https://image.tmdb.org/t/p/w500' + o.profile_path : '',
+        bio: o.biography || '', born: o.birthday || '', died: o.deathday || '', place: o.place_of_birth || '', dept: o.known_for_department || '', films: films};
+      if (info.bio || I18N.lang === 'en') { done(info); return; }
+      tmdb('/person/' + id + '?language=en-US', function (e2, en) {
+        if (!e2 && en && en.biography) info.bio = en.biography;
+        done(info);
+      });
+    });
+  }
+
+  /**
+   * The people a person works with most: in the casts of their five best-known titles (by votes), counted, the most
+   * shared first (12 at most, with a photo). done([{id, name, role, photo}]).
+   */
+  function relatedPeople(info, done) {
+    var top = info.films.slice().sort(function (a, b) { return b.votes - a.votes; }).slice(0, 5), count = {}, who = {};
+    each(top, function (f, next) {
+      tmdb('/' + f.kind + '/' + f.id + (f.kind === 'tv' ? '/aggregate_credits' : '/credits') + '?language=' + lang(), function (err, o) {
+        var cast = (!err && o && o.cast) || [];
+        for (var i = 0; i < cast.length && i < 25; i++) {
+          var c = cast[i];
+          if (c.id === info.id || !c.profile_path) continue;
+          count[c.id] = (count[c.id] || 0) + 1;
+          if (!who[c.id]) who[c.id] = {id: c.id, name: c.name, role: '', photo: 'https://image.tmdb.org/t/p/w185' + c.profile_path, pop: c.popularity || 0};
+        }
+        next();
+      });
+    }, function () {
+      var out = [];
+      for (var k in who) if (Object.prototype.hasOwnProperty.call(who, k)) out.push(who[k]);
+      out.sort(function (a, b) { return (count[b.id] - count[a.id]) || (b.pop - a.pop); });
+      done(out.slice(0, 12));
+    });
+  }
+
   function fullDetails(p, done) {
     tmdb('/' + p.kind + '/' + p.id + '?language=' + lang() + '&append_to_response=credits', function (err, o) {
       if (err || !o) { done(null); return; }
@@ -1093,11 +1152,11 @@ var Data = (function () {
       function photo(path) { return path ? 'https://image.tmdb.org/t/p/w185' + path : ''; }
       var makers = p.kind === 'tv' ? (o.created_by || []) : ((o.credits && o.credits.crew) || []).filter(function (c) { return c.job === 'Director'; });
       for (var m = 0; m < makers.length && m < 2; m++) {
-        info.people.push({name: makers[m].name, role: p.kind === 'tv' ? tr('details|Creator') : tr('details|Director'), photo: photo(makers[m].profile_path), maker: true});
+        info.people.push({id: makers[m].id, name: makers[m].name, role: p.kind === 'tv' ? tr('details|Creator') : tr('details|Director'), photo: photo(makers[m].profile_path), maker: true});
       }
       var cast = (o.credits && o.credits.cast) || [];
       for (var i = 0; i < cast.length && info.people.length < 10; i++) {
-        info.people.push({name: cast[i].name, role: cast[i].character || '', photo: photo(cast[i].profile_path)});
+        info.people.push({id: cast[i].id, name: cast[i].name, role: cast[i].character || '', photo: photo(cast[i].profile_path)});
       }
       if (info.overview || I18N.lang === 'en') { done(info); return; }
       // No overview in the TV's language: TMDB's English one.
@@ -1321,6 +1380,8 @@ var Data = (function () {
     poster: poster,
     titleLink: titleLink,
     fullDetails: fullDetails,
+    person: person,
+    relatedPeople: relatedPeople,
     /** TMDB's recommendations for a title, for its page: done([picks]) (poster, photo, name; detailed on opening). */
     related: function (p, done) {
       tmdb('/' + p.kind + '/' + p.id + '/recommendations?language=' + lang(), function (err, r) {

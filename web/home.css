@@ -1363,3 +1363,20 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 /* Home's apps, focused: only their color changes (their name is in the heading's line); they don't lift or grow. */
 .rail .tile.focus, .rail .tile.focus .look { -webkit-transform: none !important; transform: none !important; }
 .rail .tile { -webkit-transition: none; transition: none; }
+
+/* People in a cast take the focus: their photo ringed and a little bigger. */
+#detail .d-who .d-face { -webkit-transition: -webkit-transform 0.18s, box-shadow 0.18s; transition: transform 0.18s, box-shadow 0.18s; }
+#detail .d-who.focus .d-face { -webkit-transform: scale(1.1); transform: scale(1.1); box-shadow: 0 0 0 3px #FFF, 0 12px 26px rgba(0, 0, 0, 0.5); }
+#detail .d-who.focus .d-nm { color: #FFF; }
+
+/* A person's page: their films in a row that slides (newest first), the people they work with under it. */
+#detail .d-films { right: auto; width: 1680px; }
+#detail .d-filmclip { width: 1680px; height: 186px; overflow: hidden; }
+#detail .d-filmrow { white-space: nowrap; padding-top: 8px; -webkit-transition: -webkit-transform 0.25s; transition: transform 0.25s; }
+#detail .d-filmcard { position: relative; display: inline-block; width: 112px; height: 168px; margin-right: 20px; border-radius: 10px; overflow: hidden;
+  vertical-align: top; background: #2C2C2E center / cover no-repeat; -webkit-transition: -webkit-transform 0.18s, box-shadow 0.18s; transition: transform 0.18s, box-shadow 0.18s; }
+#detail .d-filmcard.focus { -webkit-transform: scale(1.08); transform: scale(1.08); box-shadow: 0 0 0 3px #FFF, 0 14px 30px rgba(0, 0, 0, 0.5); }
+#detail .d-filmcard .dim { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(8, 8, 10, 0.7); }
+#detail .d-filmcard.more { width: 56px; background: rgba(255, 255, 255, 0.1); }
+#detail .d-filmcard.more .sym { position: absolute; left: 16px; top: 72px; width: 24px; height: 24px; }
+#detail .d-relpeople .d-who { width: 128px; }
