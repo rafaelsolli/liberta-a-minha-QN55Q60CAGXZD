@@ -669,6 +669,7 @@ var Data = (function () {
   }
 
   /** Genre, runtime or seasons, and the service it's on among the TV's apps. */
+  var META_V = 2;   // 2: the line has the year and the genres, as the details page's
   function details(p, done) {
     tmdb('/' + p.kind + '/' + p.id + '?language=' + lang() + '&append_to_response=watch/providers,images,external_ids&include_image_language=null,'
         + I18N.base + ',en', function (err, o) {
@@ -677,11 +678,12 @@ var Data = (function () {
       if (best) p.backdrop = best;
       if (o.poster_path) p.poster = o.poster_path;
       p.imdb = o.imdb_id || (o.external_ids && o.external_ids.imdb_id) || '';   // RPDB's posters are by IMDb id
-      // Under the focused poster: only the genre and the length (movie) or seasons (show).
-      var parts = [];
+      // The line, as the details page's (fullDetails): year, up to three genres, the length (movie) or seasons (show).
+      var parts = [], when = (o.release_date || o.first_air_date || '').slice(0, 4);
       p.genres = (o.genres || []).map(function (g) { return g.id; });   // for the genre sub-tabs (GENRES)
+      if (when) parts.push(when);
       if (o.genres && o.genres.length) {
-        parts.push(genre(o.genres[0].name));
+        parts.push(o.genres.slice(0, 3).map(function (g) { return genre(g.name); }).join(', '));
       }
       if (p.kind === 'movie' && o.runtime > 0) {
         var h = Math.floor(o.runtime / 60), m = o.runtime % 60;
@@ -696,6 +698,9 @@ var Data = (function () {
         if (s && usable(s[1])) { p.app = s[1]; p.service = s[4]; }
       }
       p.meta = parts.join(' · ');
+      p.year = +(o.release_date || o.first_air_date || '').slice(0, 4) || 0;   // for sorting by year
+      p.score = o.vote_average > 0 && o.vote_count > 20 ? o.vote_average : 0;   // and by rating
+      p.mv = META_V;   // the line's form: one detailed before it is detailed again
       title(p, o, function () {
         p.detailed = true;
         done(null);
@@ -874,7 +879,7 @@ var Data = (function () {
   // trending comes already filtered by Trakt for a genre. Only the titles a filter keeps are detailed, 20 at a time, so
   // a page is full unless there are no more. The view (tab, kind, genre) home.js shows is what gets detailed first.
 
-  var view = {tab: 1, kind: null, genre: 0}, hotBy = {}, hotAsked = {}, detailGen = 0;
+  var view = {tab: 1, kind: null, genre: 0, sort: ''}, hotBy = {}, hotAsked = {}, hotMeta = {}, detailGen = 0;
 
   /** Whether a title is of a big genre: true, false, or null when not known yet (it may be: details will tell). */
   function keyInGenre(key, G) {
@@ -888,10 +893,37 @@ var Data = (function () {
     return false;
   }
 
+  /** What a list knows of a title to sort it by: its name (TMDB's, in the TV's language, once detailed), year, rating. */
+  function sortInfo(k) {
+    var m = (tk.lists && tk.lists.meta && tk.lists.meta[k]) || hotMeta[k] || {}, q = tk.pool[k];
+    return {t: String((q && q.detailed && q.title) || m.t || '').toLowerCase(), y: (q && q.year) || m.y || 0, r: m.r || (q && q.score) || 0};
+  }
+
+  /**
+   * A list's keys in the order picked (Data.sorts): '' as the list comes (last watched, last listed, Trakt's own
+   * order), 'old' the other way, 'name' A to Z, 'year' and 'rating' highest first. Explore's sorts are its sources.
+   */
+  function sortKeys(keys, tab, sort) {
+    if (!sort || tab === 0) return keys;
+    if (sort === 'old') return keys.slice().reverse();
+    var info = {}, out = keys.slice();
+    for (var i = 0; i < out.length; i++) info[out[i]] = sortInfo(out[i]);
+    out.sort(function (a, b) {
+      var x = info[a], y = info[b];
+      if (sort === 'name') return x.t < y.t ? -1 : x.t > y.t ? 1 : 0;
+      var d = sort === 'year' ? y.y - x.y : y.r - x.r;
+      return d || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0);
+    });
+    return out;
+  }
+
   /** A tab's titles for a filter, in its order: what isn't deleted, of the kind, of the genre (or maybe), and for
    * Explore and Discover not watched yet. */
-  function candidates(tab, kind, genre) {
-    var L = tk.lists, G = GENRES[genre || 0], keys = tabKeys(tab, genre), out = [];
+  function candidates(tab, kind, genre, sort) {
+    // sort: an order (sortKeys), '-' first for the other way round (the A→Z button), Explore's source too.
+    var rev = String(sort || '').charAt(0) === '-', by = rev ? sort.slice(1) : sort || '';
+    var L = tk.lists, G = GENRES[genre || 0], keys = sortKeys(tabKeys(tab, genre, by), tab, by), out = [];
+    if (rev) keys = keys.slice().reverse();
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i];
       if (marks.trash[k] || (kind && k.indexOf(kind + ':') !== 0) || (tab < 2 && L.watched[k])) continue;
@@ -906,16 +938,17 @@ var Data = (function () {
    * Watching (paused, or a show's next episode), 3 Watchlist, 4 Rewatch. Every detailed title shows, on one of the TV's apps or
    * not (home.js opens the rest in Stremio).
    */
-  function traktTab(tab, kind, genre) {
+  function traktTab(tab, kind, genre, sort) {
     var L = tk.lists, out = [], G = GENRES[genre || 0];
-    if (view.tab !== tab || view.kind !== kind || view.genre !== (genre || 0)) {
-      view = {tab: tab, kind: kind, genre: genre || 0};
+    sort = sort || '';
+    if (view.tab !== tab || view.kind !== kind || view.genre !== (genre || 0) || view.sort !== sort) {
+      view = {tab: tab, kind: kind, genre: genre || 0, sort: sort};
       detailGen++;   // a round for another view stops where it is
       setTimeout(detailTrakt, 0);   // the new filter's titles get their details
     }
     moreLeft[tab] = false;
     if (!L) return out;
-    var keys = candidates(tab, kind, genre), seen = 0;
+    var keys = candidates(tab, kind, genre, sort), seen = 0;
     for (var i = 0; i < keys.length && out.length < shownN[tab]; i++) {
       var p = traktPick(keys[i], '');
       if (p.detailed && keyInGenre(keys[i], G)) out.push(p);
@@ -925,22 +958,29 @@ var Data = (function () {
     return out;
   }
 
-  /** A tab's keys; Explore for a genre is Trakt's trending filtered by Trakt (fetched once for it, then kept). */
-  function tabKeys(tab, genre) {
+  /**
+   * A tab's keys. Explore by another source than trending (sort: popular, watched, anticipated), or for a genre, is
+   * that Trakt list filtered by Trakt, fetched once for it, then kept until the lists come again.
+   */
+  var EXPLORE_SOURCES = {trending: true, popular: true, watched: true, anticipated: true};   // Trakt.trending's
+  function tabKeys(tab, genre, sort) {
     var L = tk.lists;
     if (!L) return [];
-    if (tab === 0 && genre && GENRES[genre].trakt) {
-      var hot = hotBy[genre];
-      if (!hot && !hotAsked[genre]) {
-        hotAsked[genre] = true;
-        Trakt.trending(GENRES[genre].trakt, function (err, keys, genres) {
-          if (err) { hotAsked[genre] = false; return; }
-          hotBy[genre] = keys;
+    var source = tab === 0 && EXPLORE_SOURCES[sort] ? sort : '';
+    if (tab === 0 && ((genre && GENRES[genre].trakt) || (source && source !== 'trending'))) {
+      var id = (source || 'trending') + ':' + (genre || 0), hot = hotBy[id];
+      if (!hot && !hotAsked[id]) {
+        hotAsked[id] = true;
+        Trakt.trending(genre ? GENRES[genre].trakt : null, function (err, keys, genres, meta) {
+          if (err) { hotAsked[id] = false; return; }
+          hotBy[id] = keys;
           for (var k in genres) if (Object.prototype.hasOwnProperty.call(genres, k)) L.genres[k] = genres[k];
+          for (var m in meta) if (Object.prototype.hasOwnProperty.call(meta, m)) hotMeta[m] = meta[m];
           detailTrakt();
-        });
+        }, source || 'trending');
       }
       if (hot) return hot;
+      if (source && source !== 'trending') return [];   // until it comes: nothing, not trending's titles
     }
     // Continue: what's begun or has an episode out, then (in date order) the shows with one coming in the next weeks.
     return tab === 0 ? L.trending || [] : tab === 1 ? L.recommended
@@ -957,7 +997,7 @@ var Data = (function () {
     var L = tk.lists;
     detailTrakt();
     if (!L || checkingMore || !L.restShows || !L.restShows.length) return;
-    if (candidates(2, view.kind, view.genre).length >= shownN[2]) return;   // enough found already
+    if (candidates(2, view.kind, view.genre, view.sort).length >= shownN[2]) return;   // enough found already
     checkingMore = true;
     Trakt.upNextOf(L.restShows.splice(0, 30), function (found) {
       checkingMore = false;
@@ -973,13 +1013,13 @@ var Data = (function () {
     if (!Trakt.signedIn() || fetchingTrakt || !KEY || !installed.length) return;
     var t = Date.now();
     // Lists kept from before they carried Trakt's genres (or trending) are fetched again at once.
-    if (tk.lists && tk.lists.v === 8 && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
+    if (tk.lists && tk.lists.v === 11 && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
     fetchingTrakt = true;
     Trakt.lists(function (err, lists) {
       fetchingTrakt = false;
-      if (!err && lists) { tk.lists = lists; tk.at = Date.now(); hotBy = {}; hotAsked = {}; saveTrakt(); }
+      if (!err && lists) { tk.lists = lists; tk.at = Date.now(); hotBy = {}; hotAsked = {}; hotMeta = {}; saveTrakt(); }
       detailTrakt();
-    });
+    }, tk.lists);   // what's unchanged since these is reused (last_activities)
   }
 
   /**
@@ -990,15 +1030,15 @@ var Data = (function () {
     if (detailingTrakt) { detailAgain = true; return; }   // more asked meanwhile: once this round ends
     if (!tk.lists) return;
     var todo = [];
-    function take(tab, kind, genre) {
-      var keys = candidates(tab, kind, genre), n = 0, G = GENRES[genre || 0];
+    function take(tab, kind, genre, sort) {
+      var keys = candidates(tab, kind, genre, sort), n = 0, G = GENRES[genre || 0];
       for (var j = 0; j < keys.length && n < shownN[tab]; j++) {
         var p = traktPick(keys[j], '');
-        if ((!p.detailed || needsImdb(p)) && todo.indexOf(p) < 0) todo.push(p);
+        if ((!p.detailed || needsImdb(p) || p.mv !== META_V) && todo.indexOf(p) < 0) todo.push(p);
         if (keyInGenre(keys[j], G) !== false) n++;
       }
     }
-    if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre);
+    if (typeof view.tab === 'number') take(view.tab, view.kind, view.genre, view.sort);
     for (var t = 0; t < 5; t++) take(t, null, 0);
     if (!todo.length) { changed(); return; }
     detailingTrakt = true;
@@ -1078,7 +1118,7 @@ var Data = (function () {
 
   function snapshot(p) {
     return {id: p.id, kind: p.kind, title: p.title, backdrop: p.backdrop, poster: p.poster, imdb: p.imdb, app: p.app,
-      genres: p.genres || [], meta: p.meta, detailed: true, at: Date.now()};
+      genres: p.genres || [], meta: p.meta, year: p.year || 0, score: p.score || 0, mv: p.mv || 0, detailed: true, at: Date.now()};
   }
 
   /** what: 'fav', 'unfav', 'trash' (it leaves the favorites too) or 'restore'. */
@@ -1105,10 +1145,36 @@ var Data = (function () {
     return false;
   }
 
-  function marked(which, kind, genre) {
-    var all = [], m = marks[which];
+  /** Favorites and deleted ones kept with an older line: detailed again, one at a time, and kept anew. */
+  var remarking = false;
+  function remark() {
+    if (remarking) return;
+    var todo = [];
+    for (var w in {fav: 1, trash: 1}) for (var k in marks[w]) if (Object.prototype.hasOwnProperty.call(marks[w], k) && marks[w][k].mv !== META_V) todo.push([w, k]);
+    if (!todo.length) return;
+    remarking = true;
+    each(todo, function (t, next) {
+      var q = marks[t[0]][t[1]];
+      if (!q) { next(); return; }
+      var p = {id: q.id, kind: q.kind, title: q.title, backdrop: q.backdrop, poster: q.poster, meta: q.meta, app: q.app};
+      details(p, function (err) {
+        if (!err && marks[t[0]][t[1]]) { var at = marks[t[0]][t[1]].at; marks[t[0]][t[1]] = snapshot(p); marks[t[0]][t[1]].at = at; }
+        next();
+      });
+    }, function () { remarking = false; store('marks', marks); changed(); });
+  }
+
+  function marked(which, kind, genre, sort) {
+    if (KEY) setTimeout(remark, 0);
+    var all = [], m = marks[which], rev = String(sort || '').charAt(0) === '-';
+    if (rev) sort = sort.slice(1);
     for (var k in m) if (Object.prototype.hasOwnProperty.call(m, k)) all.push(m[k]);
-    all.sort(function (a, b) { return b.at - a.at; });
+    function name(p) { return String(p.title || '').toLowerCase(); }
+    all.sort(function (a, b) {
+      var d = sort === 'old' ? a.at - b.at : sort === 'name' ? (name(a) < name(b) ? -1 : name(a) > name(b) ? 1 : 0)
+        : sort === 'year' ? (b.year || 0) - (a.year || 0) : sort === 'rating' ? (b.score || 0) - (a.score || 0) : b.at - a.at;
+      return (d || b.at - a.at) * (rev ? -1 : 1);
+    });
     return all.filter(function (p) { return (!kind || p.kind === kind) && genreOk(p, genre); });
   }
 
@@ -1143,9 +1209,9 @@ var Data = (function () {
       if (tab === 2) moreUpNext(); else detailTrakt();
     },
     /** tab: 'fav', 'trash', or Trakt's 0 to 3 (the kinds' tabs without Trakt); the deleted show only in 'trash'. */
-    tabPicks: function (tab, kind, genre) {
-      if (tab === 'fav' || tab === 'trash') return marked(tab, kind, genre);
-      return (Trakt.signedIn() ? traktTab(tab, kind, genre) : now(kind)).filter(function (p) { return !deleted(p); });
+    tabPicks: function (tab, kind, genre, sort) {
+      if (tab === 'fav' || tab === 'trash') return marked(tab, kind, genre, sort);
+      return (Trakt.signedIn() ? traktTab(tab, kind, genre, sort) : now(kind)).filter(function (p) { return !deleted(p); });
     },
     mark: mark,
     /** Continue's date for a show whose next episode is still to come: its air time (ISO), else ''. */
@@ -1207,8 +1273,18 @@ var Data = (function () {
     busy: function () { return !!(fetchingRecs || fetchingTrakt || detailingTrakt || checkingMore); },
     isFav: function (p) { return !!marks.fav[markKey(p)]; },
     isTrashed: function (p) { return !!marks.trash[markKey(p)]; },
-    /** Watched on Trakt (all of it, for a show). */
-    watched: function (p) { return !!(tk.lists && tk.lists.watched[markKey(p)]); },
+    /**
+     * Watched on Trakt: a movie seen, a show seen to its end. Trakt lists a show as watched from its first episode, so a
+     * show still in Continue (an episode out or paused) isn't, nor one with an episode coming.
+     */
+    watched: function (p) {
+      var L = tk.lists, k = markKey(p), i;
+      if (!L || !L.watched[k]) return false;
+      if (p.kind !== 'tv') return true;
+      for (i = 0; i < L.progress.length; i++) if (L.progress[i].key === k) return false;
+      for (i = 0; L.upcoming && i < L.upcoming.length; i++) if (L.upcoming[i].key === k) return false;
+      return true;
+    },
     /** How far in on Trakt, 0 to 1: a paused movie's or episode's point, else a show's episodes watched of those out. */
     progressOf: function (p) {
       var L = tk.lists, k = markKey(p);
@@ -1509,24 +1585,89 @@ var Trakt = (function () {
     return tmdb > 0 ? (type === 'show' ? 'tv' : 'movie') + ':' + tmdb : '';
   }
 
+  /**
+   * Every page of a list: Trakt's sync lists come 100 at a time (250 at most however many are asked), so a big history
+   * read as one page lost the rest. done(error, items): the error only when the first page failed.
+   */
+  var PAGE = 250, PAGES_MAX = 40;
+  function getAll(path, done) {
+    var all = [], page = 1, sep = path.indexOf('?') >= 0 ? '&' : '?';
+    (function one() {
+      get(path + sep + 'limit=' + PAGE + '&page=' + page, function (err, a) {
+        if (err || !a) { done(page === 1 ? err || new Error('empty') : null, all); return; }
+        all = all.concat(a);
+        if (a.length < PAGE || ++page > PAGES_MAX) { done(null, all); return; }
+        one();
+      });
+    })();
+  }
+
   /** In steps, one request at a time: each part failing on its own leaves the rest. */
-  function lists(done) {
+  /**
+   * prev: the lists kept from before. Trakt's last_activities says when the watched movies, the watched episodes, the
+   * watchlist and the hidden shows last changed: a part that didn't since prev is taken from prev, not fetched again
+   * (a long history is many pages), so a refresh is a few small requests.
+   */
+  function lists(done, prev) {
+    get('/sync/last_activities', function (err, acts) { build(done, prev, err ? null : acts); });
+  }
+
+  function build(done, prev, acts) {
     // genres: Trakt's genre slugs of each title (extended=full), so a genre filter needs no TMDB details first.
-    // v: 8 with Trakt's progress (how far in, on the poster; lists kept from before are fetched again).
+    // v: 11 keeps each part's date (acts), when each title was watched (at) and the shows' Trakt ids, to be reused
+    // (10: every page of the sync lists; 9: each title's name, year, rating and listing date); older lists are fetched
+    // again whole.
     var hidden = {};
-    var out = {v: 8, upcoming: [], progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}}, shows = [], at = {};
+    var out = {v: 11, upcoming: [], progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}, meta: {}, at: {}, strakt: {}, hidden: {},
+      acts: {}}, shows = [], at = out.at;
+    var A = acts || {}, when = {
+      movies: A.movies && A.movies.watched_at, episodes: A.episodes && A.episodes.watched_at,
+      wlm: A.movies && A.movies.watchlisted_at, wls: A.shows && A.shows.watchlisted_at, hid: A.shows && A.shows.hidden_at
+    };
+    /** That part unchanged since prev: true, and its date kept for next time. */
+    function same(part) {
+      out.acts[part] = when[part] || '';
+      return !!(acts && when[part] && prev && prev.v === 11 && prev.acts && prev.acts[part] === when[part]);
+    }
+    /** What prev knew of a title, into out (its genres and its line's name, year, rating, listing date). */
+    function reuse(k) {
+      if (prev.genres[k]) out.genres[k] = prev.genres[k];
+      if (prev.meta[k]) out.meta[k] = prev.meta[k];
+    }
     function full(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'extended=full'; }
-    function genresOf(item, type, k) { var o = item && item[type] ? item[type] : item; if (o && o.genres) out.genres[k] = o.genres; }
+    function genresOf(item, type, k) {
+      var o = item && item[type] ? item[type] : item;
+      if (!o) return;
+      if (o.genres) out.genres[k] = o.genres;
+      var m = out.meta[k] || (out.meta[k] = {});
+      if (o.title) m.t = o.title;
+      if (o.year) m.y = o.year;
+      if (o.rating) m.r = Math.round(o.rating * 10) / 10;
+      if (item.listed_at) m.a = item.listed_at;
+    }
     function has(k) { for (var i = 0; i < out.progress.length; i++) if (out.progress[i].key === k) return true; return false; }
     function watched(path, type, next) {
-      get(path, function (err, a) {
+      if (same(type === 'movie' ? 'movies' : 'episodes')) {
+        var kind = type === 'movie' ? 'movie:' : 'tv:';
+        for (var pk in prev.watched) {
+          if (!Object.prototype.hasOwnProperty.call(prev.watched, pk) || pk.indexOf(kind) !== 0) continue;
+          out.watched[pk] = true;
+          at[pk] = prev.at[pk] || '';
+          reuse(pk);
+          if (type === 'show') { out.strakt[pk] = prev.strakt[pk]; shows.push({key: pk, at: at[pk], trakt: prev.strakt[pk]}); }
+        }
+        next();
+        return;
+      }
+      getAll(path, function (err, a) {
         for (var i = 0; !err && a && i < a.length; i++) {
           var k = key(a[i], type);
           if (!k) continue;
           var w = a[i].last_watched_at || '', u = a[i].last_updated_at || '';
           out.watched[k] = true;
           at[k] = w > u ? w : u;
-          if (type === 'show') shows.push({key: k, at: at[k], trakt: a[i].show.ids.trakt});
+          genresOf(a[i], type, k);
+          if (type === 'show') { out.strakt[k] = a[i].show.ids.trakt; shows.push({key: k, at: at[k], trakt: out.strakt[k]}); }
         }
         next();
       });
@@ -1553,7 +1694,17 @@ var Trakt = (function () {
       upNextOf(all.slice(0, UP_NEXT_SHOWS), function (found) { out.progress = out.progress.concat(found); next(); });
     }
     function listed(path, type, list, max, next) {
-      get(full(path), function (err, a) {
+      var part = path.indexOf('/sync/watchlist/') === 0 ? (type === 'movie' ? 'wlm' : 'wls') : '';
+      if (part && same(part)) {
+        var kind2 = type === 'movie' ? 'movie:' : 'tv:';
+        for (var w = 0; w < prev.watchlist.length && list.length < max; w++) {
+          if (prev.watchlist[w].indexOf(kind2) === 0) { list.push(prev.watchlist[w]); reuse(prev.watchlist[w]); }
+        }
+        next();
+        return;
+      }
+      // The user's own lists in every page; Trakt's (recommendations, trending) take a limit of their own.
+      (path.indexOf('/sync/') === 0 ? getAll : get)(full(path), function (err, a) {
         a = (!err && a) ? a.slice() : [];
         if (a.length && a[0].listed_at) a.sort(function (x, y) { return x.listed_at < y.listed_at ? 1 : x.listed_at > y.listed_at ? -1 : 0; });
         for (var i = 0; i < a.length && list.length < max; i++) {
@@ -1581,10 +1732,12 @@ var Trakt = (function () {
     }
     function both(a, b, list, max) { for (var i = 0; i < max; i++) { if (a[i]) list.push(a[i]); if (b[i]) list.push(b[i]); } }
     // The shows hidden from progress (Stop watching here, or Trakt's own Drop): left out of Continue.
-    get('/users/hidden/progress_watched?type=show&limit=1000', function (herr, ha) {
+    (same('hid') ? function (path, cb) { cb(null, null); } : getAll)('/users/hidden/progress_watched?type=show', function (herr, ha) {
+      if (!ha && prev && prev.hidden && out.acts.hid && prev.acts && prev.acts.hid === out.acts.hid) hidden = prev.hidden;
       for (var h = 0; !herr && ha && h < ha.length; h++) { var hk = key(ha[h], 'show'); if (hk) hidden[hk] = true; }
-    watched('/sync/watched/movies', 'movie', function () {
-      watched('/sync/watched/shows?extended=noseasons', 'show', function () {
+      out.hidden = hidden;
+    watched('/sync/watched/movies?extended=full', 'movie', function () {
+      watched('/sync/watched/shows?extended=noseasons,full', 'show', function () {
         playback(function () {
           upNext(function () {
             listed('/sync/watchlist/movies', 'movie', mixed.movies, WATCHLIST_MAX, function () {
@@ -1594,6 +1747,8 @@ var Trakt = (function () {
                     listed('/movies/trending?limit=' + TRENDING_MAX, 'movie', hot.movies, TRENDING_MAX, function () {
                       listed('/shows/trending?limit=' + TRENDING_MAX, 'show', hot.shows, TRENDING_MAX, function () {
                         both(mixed.movies, mixed.shows, out.watchlist, WATCHLIST_MAX);
+                        // The watchlist by when each title went in, movies and shows together.
+                        out.watchlist.sort(function (x, y) { var a = (out.meta[x] || {}).a || '', b = (out.meta[y] || {}).a || ''; return a < b ? 1 : a > b ? -1 : 0; });
                         both(picks.movies, picks.shows, out.recommended, RECOMMENDED_MAX);
                         both(hot.movies, hot.shows, out.trending, TRENDING_MAX);
                         // Rewatch: everything watched, the last watched first (when it was, or marked so).
@@ -1677,16 +1832,22 @@ var Trakt = (function () {
     })();
   }
 
-  /** Trending on Trakt in these genres (Trakt's own filter), movies and shows interleaved: done(null, keys, genres). */
-  function trending(slugs, done) {
-    var g = '&genres=' + encodeURIComponent(slugs.join(',')), out = [], genres = {}, lists = {movie: [], show: []};
+  /**
+   * Explore's lists on Trakt, by source: trending (who's watching now), popular, most watched this week, anticipated;
+   * in these genres (Trakt's own filter) or all. Movies and shows interleaved: done(null, keys, genres, meta).
+   */
+  var EXPLORE_PATHS = {trending: 'trending', popular: 'popular', watched: 'watched/weekly', anticipated: 'anticipated'};
+  function trending(slugs, done, source) {
+    var g = slugs && slugs.length ? '&genres=' + encodeURIComponent(slugs.join(',')) : '', out = [], genres = {}, meta = {}, lists = {movie: [], show: []};
+    var path = EXPLORE_PATHS[source] || 'trending';
     function one(type, next) {
-      get('/' + type + 's/trending?limit=' + TRENDING_MAX + g + '&extended=full', function (err, a) {
+      get('/' + type + 's/' + path + '?limit=' + TRENDING_MAX + g + '&extended=full', function (err, a) {
         for (var i = 0; !err && a && i < a.length; i++) {
-          var k = key(a[i], type);
+          var k = key(a[i], type), o = a[i][type] || a[i];   // popular answers the titles bare, the others wrapped
           if (!k) continue;
           lists[type].push(k);
-          if (a[i][type] && a[i][type].genres) genres[k] = a[i][type].genres;
+          if (o.genres) genres[k] = o.genres;
+          meta[k] = {t: o.title, y: o.year, r: o.rating ? Math.round(o.rating * 10) / 10 : 0};
         }
         next();
       });
@@ -1697,7 +1858,7 @@ var Trakt = (function () {
           if (lists.movie[i]) out.push(lists.movie[i]);
           if (lists.show[i]) out.push(lists.show[i]);
         }
-        done(null, out, genres);
+        done(null, out, genres, meta);
       });
     });
   }

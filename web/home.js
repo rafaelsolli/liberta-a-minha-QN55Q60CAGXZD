@@ -440,8 +440,8 @@
 
   // MARK: - Focus
 
-  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about', SEARCH: 'search', SUB: 'sub', GENRE: 'genre', ACT: 'act', SPIDER: 'spider', DETAIL: 'detail'};
-  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, city: 0, key: 0, sub: 0, genre: 0, act: 0};
+  var Z = {TOP: 'top', CARDS: 'cards', SHELF: 'shelf', DRAWER: 'drawer', APPS: 'apps', SETTINGS: 'settings', EDIT: 'edit', LANG: 'lang', CITY: 'city', KEY: 'key', ABOUT: 'about', SEARCH: 'search', SUB: 'sub', GENRE: 'genre', ACT: 'act', SPIDER: 'spider', DETAIL: 'detail', MENU: 'menu'};
+  var st = {zone: Z.SHELF, top: 0, tab: 0, card: 0, shelf: 0, drawer: 0, grid: 0, row: 0, edit: 0, lang: 0, city: 0, key: 0, sub: 0, genre: 0, act: 0, sort: '', rev: false, dd: 0, menu: 0};
   var cards = [];
 
   function sheetOpen() { return st.zone === Z.DETAIL || st.zone === Z.APPS || st.zone === Z.SETTINGS || st.zone === Z.EDIT || st.zone === Z.LANG || st.zone === Z.CITY || st.zone === Z.KEY || st.zone === Z.ABOUT; }
@@ -460,9 +460,18 @@
     setClass(body, 'searchfocus', st.zone === Z.SEARCH && searchOpen);   // the magnifier dark on the white field
     list = $('subtabs') ? $('subtabs').children : [];
     for (i = 0; i < list.length; i++) {
+      if (railMode()) { setClass(list[i], 'focus', (st.zone === Z.SUB || st.zone === Z.MENU) && st.dd === i); continue; }
       setClass(list[i], 'on', i === (st.sub || 0) && !searchMode);
       setClass(list[i], 'focus', st.zone === Z.SUB && st.sub === i);
     }
+    list = $('ddmenu') ? $('ddmenu').children : [];
+    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.MENU && st.menu === i);
+    if (st.zone !== Z.MENU && $('ddmenu')) setClass($('ddmenu'), 'open', false);
+    setClass(body, 'railopen', railMode() && st.zone === Z.TOP);
+    setClass(body, 'catalog', catalog());
+    setClass(body, 'homeview', homeView());
+    setClass(body, 'searching', searchMode || searchOpen);
+    renderHeading();
     list = $('genres') ? $('genres').children : [];
     for (i = 0; i < list.length; i++) {
       setClass(list[i], 'on', i === (st.genre || 0) && !searchMode);
@@ -475,6 +484,8 @@
       setClass(list[i], 'acting', st.zone === Z.ACT && st.card === i);   // its buttons focused: its name and line stay
     }
     if (st.zone === Z.CARDS && cards[st.card] && cards[st.card].more) startMore();   // reaching the arrow loads more
+    // The grid: the next ones once the focus is in the last two rows.
+    if (railMode() && st.zone === Z.CARDS && cards.length && Data.hasMore(dataTab()) && Math.floor(st.card / gridCols()) >= Math.floor((cards.length - 1) / gridCols()) - 1) startMore();
     renderActions();
     if (st.zone === Z.SPIDER && !spiderShown()) st.zone = cards.length ? Z.CARDS : Z.SHELF;
     setClass($('empty'), 'focus', st.zone === Z.SPIDER);
@@ -544,20 +555,187 @@
   function tabsN() { return Trakt.signedIn() ? TRAKT_TABS.length : 3; }
   function dataTab() { return Trakt.signedIn() ? TRAKT_TABS[st.tab] : st.tab; }
   /** Where every entry lands: Explore (Trakt's, or the first tab without it). */
-  function startTab() { return Trakt.signedIn() ? 1 : 0; }
+  function startTab() { return railMode() ? 0 : Trakt.signedIn() ? 1 : 0; }   // with the rail: Home, the shortcuts
+  /** With the rail, only Home has the shelf: the other sections are the catalog. */
+  function catalog() { return railMode() && dataTab() !== 'fav' && !searchMode; }
+  /** Home with the rail: the shortcuts, the apps on top and the favorites under them (never the spider). */
+  function homeView() { return railMode() && dataTab() === 'fav' && !searchMode; }
 
   // With Trakt, each tab has sub-tabs under it: All, Movies, Shows (st.sub). Without, the tabs are the kinds already.
   var SUB_KIND = [null, 'movie', 'tv'];
   function hasSubs() { return Trakt.signedIn() && Data.hasKey(); }
 
+  // MARK: - The rail (with Trakt): the sections down the left as icons, their names out when it has the focus; at the
+  // top, the section's name and what's in it, and at the right its dropdowns (kind, genre, order) and Clear.
+
+  function railMode() { return Trakt.signedIn() && Data.hasKey(); }
+  var RAIL_X = 184;   // where the posters, the heading and the title's line start with the rail
+  var RAIL_ICONS = {fav: 'home', 0: 'explore', 1: 'discover', 2: 'continue', 3: 'watchlist', 4: 'rewatch', trash: 'trash'};
+
+  function sectionName(t) {
+    return t === 'fav' ? tr('tab|Home') : t === 0 ? tr('Explore') : t === 1 ? tr('tab|Discover') : t === 2 ? tr('tab|Continue')
+      : t === 3 ? tr('tab|Watchlist') : t === 4 ? tr('tab|Rewatch') : tr('tab|Trash');
+  }
+
+  function sectionAbout(t) {
+    return t === 'fav' ? tr('section|Your apps and your favorites') : t === 0 ? tr('section|What people are watching on Trakt')
+      : t === 1 ? tr('section|Picked for you by Trakt, from what you watch') : t === 2 ? tr("section|What you've begun, and new episodes of your shows")
+      : t === 3 ? tr('section|Your Trakt watchlist') : t === 4 ? tr("section|Everything you've watched, to watch again")
+      : tr("section|What you've deleted: restore it from its page");
+  }
+
+  /**
+   * A section's orders, [value, label, way]: the first is how its list comes. way is what the arrow's two ends mean
+   * (as it comes, the other way round), or none for Trakt's own lists (Explore's, Discover's), whose way is theirs.
+   */
+  function sorts(t) {
+    var dates = [tr('sort|Newest first'), tr('sort|Oldest first')], name = ['name', tr('sort|Name'), [tr('sort|A to Z'), tr('sort|Z to A')]];
+    var year = ['year', tr('sort|Year'), [tr('sort|Newest first'), tr('sort|Oldest first')]];
+    var rating = ['rating', tr('sort|Rating'), [tr('sort|Highest rated'), tr('sort|Lowest rated')]];
+    if (t === 0) return [['', tr('sort|Trending')], ['popular', tr('sort|Popular')], ['watched', tr('sort|Most watched')], ['anticipated', tr('sort|Most anticipated')]];
+    if (t === 1) return [['', tr('sort|Recommended')], name, year, rating];
+    if (t === 2 || t === 4) return [['', tr('sort|Date watched'), dates], name, year, rating];
+    if (t === 3) return [['', tr('sort|Date added'), dates], name, ['year', tr('sort|Release date'), year[2]], rating];
+    return [['', tr('sort|Date added'), dates], name, year, rating];
+  }
+
+  /** The order in use's [label, way] (its way none when the arrow is locked). */
+  function sortNow() { var o = sorts(dataTab()); for (var i = 0; i < o.length; i++) if (o[i][0] === st.sort) return o[i]; return o[0]; }
+
+  function kinds() { return [tr('kind|All'), tr('Movies'), tr('Shows')]; }
+  function genreNames() {
+    return [tr('genre|All genres'), tr('genre|Adventure'), tr('genre|Comedy'), tr('genre|Drama'), tr('genre|Thriller'),
+      tr('genre|Animation'), tr('genre|Documentary')];
+  }
+  function sortLabel() { return sortNow()[1]; }
+  /** The arrow turns only an order of ours: Trakt's lists keep theirs. */
+  function wayLocked() { return !sortNow()[2]; }
+  /** The order as Data takes it: its value, '-' first when the A→Z button turned it the other way. */
+  function sortArg() { return (st.rev ? '-' : '') + (st.sort || ''); }
+
+  /** The rail's order down the screen: Search (and the gear, if any) first, then the sections. */
+  function railOrder() {
+    var o = [], b, i;
+    for (b = 0; b < topItems.length; b++) o.push(tabsN() + b);
+    for (i = 0; i < tabsN(); i++) o.push(i);
+    return o;
+  }
+
+  /** The heading's name and line: the section's, or Search's while searching. */
+  function renderHeading() {
+    if (!railMode()) return;
+    var name = searchMode || searchOpen ? tr('rail|Search') : sectionName(dataTab());
+    var about = searchMode || searchOpen ? tr('section|Movies and shows on TMDB') : sectionAbout(dataTab());
+    if ($('title').textContent !== name) $('title').textContent = name;
+    var sub = $('subtitle');
+    if (!sub) { sub = el('div', '', $('title').parentNode); sub.id = 'subtitle'; }
+    // A poster focused: its name and line (the grid has no room under it); an app on Home's row: its name.
+    var p = st.zone === Z.CARDS && cards[st.card] && !cards[st.card].more ? cards[st.card] : null;
+    if (!p && st.zone === Z.SHELF && homeView() && shelf[st.shelf]) p = {kind: 'app', id: shelf[st.shelf].id, title: shelf[st.shelf].title, meta: ''};
+    var key = p ? 'p:' + p.kind + p.id + (p.meta || '') : 'a:' + about;
+    if (sub.getAttribute('data-k') === key) return;
+    sub.setAttribute('data-k', key);
+    sub.innerHTML = '';
+    setClass(sub, 'pick', !!p);
+    if (!p) { sub.textContent = about; return; }
+    el('span', 'pname', sub, p.title || '');
+    if (p.meta) el('span', 'pmeta', sub, '  ·  ' + p.meta);
+  }
+
+  /** The dropdowns at the top right (kind, genre, order), then Clear while any is off its first value. */
+  function ddItems() {
+    // After the order, its way: A→Z as it comes, Z→A the other way round, whatever the order is.
+    var out = [['kind', kinds()[st.sub || 0]], ['genre', genreNames()[st.genre || 0]], ['sort', sortLabel()]];
+    out.push(['dir', '']);   // always there (nothing moves between sections); Trakt's own lists lock it
+    return out;
+  }
+
+  function renderDropdowns() {
+    var row = $('subtabs');
+    if (!row) { row = el('div', '', $('tabs').parentNode); row.id = 'subtabs'; }
+    row.innerHTML = '';
+    row.style.left = '';   // alignRows' place for the old rows; the dropdowns sit at the right
+    if ($('genres')) { $('genres').innerHTML = ''; $('genres').style.left = ''; }
+    var items = ddItems();
+    for (var i = 0; i < items.length; i++) {
+      var b = el('button', 'dd dd-' + items[i][0], row);   // kind, genre and sort keep one width each: nothing moves
+      var m = el('span', 'mark', b);
+      var glyph = items[i][0] === 'clear' ? 'clear' : items[i][0] === 'dir' ? (st.rev ? 'up' : 'down') : 'chevron';
+      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + glyph + '.svg)';
+      if (items[i][0] === 'dir' && wayLocked()) setClass(b, 'locked', true);   // dimmed, skipped by the focus
+      else if (items[i][0] === 'dir') el('span', 'tip', b, sortNow()[2][st.rev ? 1 : 0]);
+      el('span', 'txt', b, items[i][1]);
+      hover(b, Z.SUB, i);
+    }
+    if (st.dd >= items.length) st.dd = items.length - 1;
+  }
+
+  /** A dropdown open under its button: its choices, the one in use ticked. */
+  function openMenu() {
+    var which = ddItems()[st.dd] && ddItems()[st.dd][0];
+    if (!which) return;
+    if (which === 'dir') { if (!wayLocked()) { st.rev = !st.rev; refilter(); } return; }
+    var list = which === 'kind' ? kinds() : which === 'genre' ? genreNames() : sorts(dataTab()).map(function (o) { return o[1]; });
+    var now = which === 'kind' ? st.sub || 0 : which === 'genre' ? st.genre || 0 : sortIndex();
+    var menu = $('ddmenu');
+    if (!menu) { menu = el('div', '', $('top')); menu.id = 'ddmenu'; }
+    menu.innerHTML = '';
+    menu.which = which;
+    for (var i = 0; i < list.length; i++) {
+      var r = el('div', 'opt' + (i === now ? ' on' : ''), menu);
+      var m = el('span', 'mark', r);
+      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-check.svg)';
+      el('span', 'txt', r, list[i]);
+      hover(r, Z.MENU, i);
+    }
+    var btn = $('subtabs').children[st.dd];   // under its button, and inside the screen
+    setClass(menu, 'open', true);
+    var at = btn ? btn.offsetLeft + $('subtabs').offsetLeft : 1200;
+    menu.style.left = Math.min(at, 1840 - menu.offsetWidth) + 'px';
+    st.menu = now;
+    st.zone = Z.MENU;
+    updateFocus();
+  }
+
+  function sortIndex() { var o = sorts(dataTab()); for (var i = 0; i < o.length; i++) if (o[i][0] === st.sort) return i; return 0; }
+
+  function closeMenu() { setClass($('ddmenu'), 'open', false); st.zone = Z.SUB; updateFocus(); }
+
+  function chooseMenu() {
+    var menu = $('ddmenu'), which = menu && menu.which;
+    if (which === 'kind') st.sub = st.menu;
+    else if (which === 'genre') st.genre = st.menu;
+    else if (which === 'sort') { st.sort = (sorts(dataTab())[st.menu] || [''])[0]; if (wayLocked()) st.rev = false; }
+    setClass(menu, 'open', false);
+    st.zone = Z.SUB;
+    refilter();
+  }
+
+  /** The filters changed: the row from its start, the dropdowns' words again. */
+  function refilter() {
+    renderDropdowns();
+    st.dd = Math.max(0, Math.min($('subtabs').children.length - (wayLocked() ? 2 : 1), st.dd));   // off a locked arrow
+    selectSub(st.sub || 0);
+  }
+
   function renderTop() {
     $('title').textContent = tr('For You');
+    setClass(body, 'rail', railMode());
     var tabs = $('tabs');
     tabs.innerHTML = '';
     renderSubs();
     // Signed in to Trakt: the account's tabs (Data.tabPicks) in place of the kinds.
     var names = Trakt.signedIn() ? ['icon:home', tr('Explore'), tr('tab|Discover'), tr('tab|Continue'), tr('tab|Watchlist'), tr('tab|Rewatch'), 'icon:trash']
         : [tr('Explore'), tr('Movies'), tr('Shows')];
+    if (railMode()) {
+      for (var ri = 0; ri < TRAKT_TABS.length; ri++) {
+        var rt = el('button', 'tab rail', tabs), rm = el('span', 'mark', rt);
+        rm.style.webkitMaskImage = rm.style.maskImage = 'url(icons/glyph-' + RAIL_ICONS[TRAKT_TABS[ri]] + '.svg)';
+        el('span', 'label', rt, sectionName(TRAKT_TABS[ri]));
+        hover(rt, Z.TOP, ri);
+      }
+      names = [];
+    }
     for (var i = 0; i < names.length; i++) {
       var icon = names[i].indexOf('icon:') === 0, t = el('button', 'tab' + (icon ? ' icon' : ''), tabs, icon ? '' : names[i]);
       if (icon) { var mk = el('span', 'mark', t); mk.style.webkitMaskImage = mk.style.maskImage = 'url(icons/glyph-' + names[i].slice(5) + '.svg)'; }
@@ -569,7 +747,16 @@
     // opens TV Settings), and only without settings_on_tv=false, where config.properties holds them all.
     topItems = [['apps', tr('Search'), openSearch, 'icons/glyph-search.svg', 'bare']];   // no disc; focus opens it
     if (CONFIG.settingsOnTv !== false) topItems.push(['settings', tr('light|Settings'), openSettings]);
+    if (railMode()) topItems[0][1] = tr('rail|Search');
     for (var b = 0; b < topItems.length; b++) {
+      if (railMode()) {   // in the rail, above the sections: Search (and the gear)
+        var rb = el('button', 'tab rail', buttons), rbm = el('span', 'mark', rb);
+        if (topItems[b][3]) rbm.style.webkitMaskImage = rbm.style.maskImage = 'url(' + topItems[b][3] + ')';
+        else rbm.style.webkitMaskImage = rbm.style.maskImage = 'url(icons/glyph-settings.svg)';
+        el('span', 'label', rb, topItems[b][1]);
+        hover(rb, Z.TOP, tabsN() + b);
+        continue;
+      }
       var r = el('button', 'round' + (b === topItems.length - 1 ? ' last' : '') + (topItems[b][4] ? ' ' + topItems[b][4] : ''), buttons);
       r.style.left = (1772 - 88 * (topItems.length - 1 - b)) + 'px';
       var mark = sym(topItems[b][0], r);
@@ -578,7 +765,7 @@
       hover(r, Z.TOP, tabsN() + b);
     }
     if (st.top > tabsN() - 1 + topItems.length) st.top = tabsN() - 1 + topItems.length;
-    alignRows();
+    if (railMode()) { renderDropdowns(); renderHeading(); } else alignRows();
     // Trakt not signed in yet: the code to type at trakt.tv/activate, at the top right (Trakt.signIn makes it).
     var tk = Trakt.state, hint = tk.code ? 'Trakt · ' + trf('{url}, code {code}', {url: tk.url, code: tk.code}) : tk.message;
     if (hint && !Trakt.signedIn() && !searchOpen) el('div', 'trakthint', buttons, hint);
@@ -678,18 +865,22 @@
   // MARK: - Picks and background
 
   function renderCards() {
-    var list = searchMode ? searchResults : Data.tabPicks(dataTab(), Trakt.signedIn() ? SUB_KIND[st.sub || 0] : TAB_KIND[st.tab], st.genre || 0);
+    var list = searchMode ? searchResults : Data.tabPicks(dataTab(), Trakt.signedIn() ? SUB_KIND[st.sub || 0] : TAB_KIND[st.tab], st.genre || 0, sortArg());
     // More of the tab on Trakt than it shows: an arrow ends the row, and OK on it brings 20 more (Data.more).
     if (!searchMode && Data.hasMore(dataTab())) list = list.concat([{id: 'more', kind: '', title: '', backdrop: '', meta: '', more: true}]);
     var holder = $('cards');
     setClass(body, 'no-picks', !list.length);
-    renderEmpty(!list.length && !searchMode);
+    renderEmpty(!list.length && !searchMode && !homeView());   // Home empty of favorites: just the apps
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
     if (!Data.hasKey() && st.zone === Z.TOP && st.top < tabsN()) st.top = tabsN();
     var same = list.length === cards.length;
-    for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta;
+    function marks(p) { return Trakt.signedIn() && !p.more ? (Data.watched(p) ? 'w' : '') + Math.round(Data.progressOf(p) * 100) : ''; }
+    for (var i = 0; same && i < list.length; i++) {
+      same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta && marks(list[i]) === cards[i].marks;
+    }
     if (same && holder.children.length === list.length) return;
     cards = list;
+    for (var mk = 0; mk < list.length; mk++) list[mk].marks = marks(list[mk]);   // what Trakt said when drawn
     loadingMore = false;
     holder.innerHTML = '';
     for (var c = 0; c < list.length; c++) {
@@ -718,7 +909,7 @@
         var bar = el('div', 'prog' + (CONFIG.rpdbKey && p.imdb ? ' over-rpdb' : ''), img);
         el('div', 'fill', bar).style.width = Math.max(4, Math.round(far * 100)) + '%';
       }
-      if (Trakt.signedIn() && dataTab() !== 4 && Data.watched(p)) setClass(card, 'seen', true);
+      if (Trakt.signedIn() && dataTab() !== 4 && Data.watched(p)) { setClass(card, 'seen', true); el('div', 'dim', img); }   // a shade over it
       el('div', 'name', card, p.title);
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
@@ -735,18 +926,66 @@
    * row scrolls a card at a time (the holder slides), and the cards at the edges lose their text. Only the holder's
    * transform and the backdrop's opacity animate: the widths change at once (older TVs).
    */
+  // MARK: - The grid (with the rail): as many columns of posters as fit, scrolling down, more coming as the last rows are reached.
+  // The focused one's name and line are in the heading, under the section's name.
+
+  var GRID = {min: 250, w: 250, h: 375, gx: 24, gy: 36};
+  /**
+   * As many columns as fit between the rail and the screen's right margin (80), each poster at least GRID.min wide;
+   * then the columns stretch to fill the row (6 on a 1920 page beside the rail).
+   */
+  function gridCols() {
+    var room = 1920 - 80 - RAIL_X, cols = Math.max(1, Math.floor((room + GRID.gx) / (GRID.min + GRID.gx)));
+    GRID.w = Math.floor((room - (cols - 1) * GRID.gx) / cols);
+    GRID.h = Math.round(GRID.w * 1.5);
+    return cols;
+  }
+  // The heading's line sits halfway between the dropdowns' bottom (122) and RAIL_TOP, where the catalog's posters and
+  // Home's apps start; Home's posters come 40 under the apps.
+  var RAIL_TOP = 196;
+  // Home's apps a little lower, as far from the heading's line (it ends at 174) as from the favorites (at 356).
+  var APPS_TOP = 205;
+  function gridTop() { return homeView() ? (APPS_GRID ? RAIL_TOP + shelfRows() * APP_ROW : RAIL_TOP + 160) : RAIL_TOP; }
+
+  /** Rows that scroll up go under a clip at the grid's top (the heading, Home's apps stay). */
+  function gridClip() {
+    var clip = $('gridclip'), holder = $('cards');
+    if (!clip) { clip = el('div', '', $('top')); clip.id = 'gridclip'; }
+    if (holder.parentNode !== clip) clip.appendChild(holder);
+    var top = gridTop() - 30;   // room above for the focused poster's lift
+    clip.style.top = top + 'px';
+    clip.style.height = (1080 - top) + 'px';
+    return 30;
+  }
+
+  function layoutGrid() {
+    var cols = gridCols(), holder = $('cards'), nodes = holder.children, g = GRID, step = g.h + g.gy, pad = gridClip();
+    var row = Math.floor(st.card / cols), first = Math.max(0, row - 1);   // the focused row first or second
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i], c = i % cols, r = Math.floor(i / cols);
+      n.style.left = (RAIL_X + c * (g.w + g.gx)) + 'px';
+      n.style.top = (pad + r * step) + 'px';
+      n.style.width = g.w + 'px';
+      n.style.height = g.h + 'px';
+      setClass(n, 'edge', false);
+    }
+    holder.style.webkitTransform = holder.style.transform = 'translateY(' + (-first * step) + 'px)';
+  }
+
   function layoutCards() {
+    if (railMode()) { layoutGrid(); return; }
     // Posters only, as many as a tab has: the row slides to keep the focused one among the first four on screen.
     // At the row's end it stops where the last poster meets the right edge, not leaving a gap after it.
-    var holder = $('cards'), nodes = holder.children, left = 80, step = POSTER_W + 32;
+    // With the rail, the row starts right of it (RAIL_X) and is that much narrower.
+    var start = railMode() ? RAIL_X : 80, holder = $('cards'), nodes = holder.children, left = start, step = POSTER_W + 32;
     var arrow = cards.length && cards[cards.length - 1].more ? POSTER_W - ARROW_W : 0;
-    var end = Math.max(0, nodes.length * step - arrow - 32 - 1760), scroll = Math.min(end, Math.max(0, st.card - 3) * step);
+    var end = Math.max(0, nodes.length * step - arrow - 32 - (1840 - start)), scroll = Math.min(end, Math.max(0, st.card - 3) * step);
     for (var i = 0; i < nodes.length; i++) {
       var wide = false, w = cards[i] && cards[i].more ? ARROW_W : POSTER_W, n = nodes[i], at = left - scroll;
       n.style.left = left + 'px';
       n.style.width = w + 'px';
       setClass(n, 'wide', wide);
-      setClass(n, 'edge', at < 0 || at > 1740);
+      setClass(n, 'edge', at < start - 80 || at > 1740);
       if (wide && !n.getAttribute('data-back') && cards[i]) {
         n.setAttribute('data-back', '1');
         n.querySelector('.back').style.backgroundImage = 'url(' + Data.image(cards[i].backdrop, 'w1280') + ')';
@@ -957,6 +1196,7 @@
     var art = Data.poster(p, 'w500') || (p.poster ? Data.image(p.poster, 'w500') : '');
     var poster = el('div', 'd-poster', d);
     if (art) { poster.style.backgroundImage = 'url(' + art + ')'; if (CONFIG.rpdbKey) poster.style.backgroundPosition = '50% 100%'; }
+    badge(p, poster);   // the app it opens in, at its top right, as on the catalog's posters
     var box = el('div', 'box', d);
     // d- names: the settings' and All Apps' rules use title, row, head and face.
     el('div', 'd-title', box, p.title || '');
@@ -995,10 +1235,13 @@
       var row = el('div', 'd-relrow', rel);
       for (var i = 0; i < detailRelated.length; i++) {
         // TMDB's plain posters: RPDB's scores are too small to read at this size
-        el('div', 'd-relcard', row).style.backgroundImage = 'url(' + Data.image(detailRelated[i].poster, 'w185') + ')';
+        var rc = el('div', 'd-relcard', row);
+        rc.style.backgroundImage = 'url(' + Data.image(detailRelated[i].poster, 'w185') + ')';
+        if (Trakt.signedIn() && Data.watched(detailRelated[i])) { setClass(rc, 'seen', true); el('div', 'dim', rc); }   // as the catalog's
       }
-      // Right of them, the focused one's name and line (year, genres, length), as the screen shows a pick's.
+      // Right of the last one, the focused one's name and line, as the catalog shows a pick's (genre, length).
       var side = el('div', 'd-relinfo', rel);
+      side.style.left = (detailRelated.length * REL_STEP + 20) + 'px';
       el('div', 'd-relname', side);
       el('div', 'd-relmeta', side);
       updateDetailFocus();
@@ -1036,6 +1279,7 @@
     relatedInfo(d, st.zone === Z.DETAIL && df.row === 1 ? detailRelated[df.i] : null);
   }
 
+  var REL_STEP = 112;   // a related poster (96) and its gap
   var relInfo = {};   // a related title's line, by kind:id, fetched once when it's focused
 
   function relatedInfo(d, p) {
@@ -1050,7 +1294,7 @@
     relInfo[k] = '';
     Data.fullDetails(p, function (info) {
       if (!info) return;
-      var bits = [];
+      var bits = [];   // as everywhere: year, genres, length or seasons
       if (info.year) bits.push(info.year);
       if (info.genres.length) bits.push(info.genres.join(', '));
       if (info.length) bits.push(info.length);
@@ -1209,18 +1453,27 @@
 
   var shelfFirst = 0, tileStep = 0, tileLeft = 0;
 
+  // With the rail, Home's apps are a grid as the posters: as many columns as fit, rows under rows.
+  var APP_ROW = 184;   // a tile (120) and the name under it
+  // Off: one row that scrolls sideways reads better over the favorites' grid. On, the apps wrap into rows.
+  var APPS_GRID = false;
+  function shelfCols() { return APPS_GRID ? Math.max(1, Math.floor((1920 - 80 - RAIL_X + 40) / (120 + 40))) : Math.max(1, shelf.length); }
+  function shelfRows() { return Math.max(1, Math.ceil(shelf.length / shelfCols())); }
+
   function renderShelf() {
-    var n = Math.min(shelf.length, SHELF_VISIBLE), gap = 40, pad = 40;
+    var n = railMode() && APPS_GRID ? Math.min(shelf.length, shelfCols()) : Math.min(shelf.length, SHELF_VISIBLE), gap = 40, pad = 40;
     // Square tiles, as a phone's app icons: never taller than 120 (the name shows under the focused one, inside the
     // glass), and the glass keeps its bottom edge.
-    var tw = Math.min(120, (1760 - Math.max(0, n - 1) * gap) / Math.max(1, n)), th = tw;
-    var width = n * tw + Math.max(0, n - 1) * gap, left = 80;   // the picks' left edge
+    // With the rail: right under Home's heading, from where the posters start (the catalog hides it).
+    var left = railMode() ? RAIL_X : 80, room = 1840 - left;
+    var tw = Math.min(120, (room - Math.max(0, n - 1) * gap) / Math.max(1, n)), th = tw;
+    var width = n * tw + Math.max(0, n - 1) * gap, tileY = railMode() ? APPS_TOP : 894 + 126 - th;   // the picks' left edge
     var platter = $('platter');
     platter.className = 'bare';
     platter.style.display = n ? '' : 'none';
     platter.style.left = (left - pad) + 'px';
     platter.style.width = (width + 2 * pad) + 'px';
-    platter.style.top = (854 + 126 - th) + 'px';   // 40 lower than the stock layout: the room under it
+    platter.style.top = (tileY - 40) + 'px';   // 40 lower than the stock layout: the room under it
     platter.style.height = (th + 2 * pad) + 'px';
     $('quotes').style.right = (1920 - left - width) + 'px';
     var tiles = $('tiles');
@@ -1230,7 +1483,7 @@
     shelfFirst = Math.max(0, Math.min(shelfFirst, shelf.length - n));
     for (var i = 0; i < shelf.length; i++) {
       var t = el('div', 'tile', tiles);
-      t.style.top = (894 + 126 - th) + 'px';
+      t.style.top = tileY + 'px';
       t.style.width = tw + 'px';
       t.style.height = th + 'px';
       t.className = 'tile bare';
@@ -1254,6 +1507,19 @@
   /** The row slides (a transform on #tiles, which old TVs animate), and the apps it takes past the glass fade out. */
   function placeTiles() {
     var row = $('tiles'), tiles = row.children, n = Math.min(shelf.length, SHELF_VISIBLE);
+    if (railMode() && APPS_GRID) {   // the grid: every app shown, row after row; nothing scrolls sideways
+      var cols = shelfCols();
+      for (var g = 0; g < shelf.length; g++) {
+        tiles[g].style.left = (tileLeft + (g % cols) * tileStep) + 'px';
+        tiles[g].style.top = (RAIL_TOP + Math.floor(g / cols) * APP_ROW) + 'px';
+        tiles[g].style.opacity = '';
+        tiles[g].style.pointerEvents = '';
+      }
+      row.style.webkitTransform = row.style.transform = 'none';
+      var ar = $('platter').children;
+      for (var a = 0; a < ar.length; a++) ar[a].style.visibility = 'hidden';
+      return;
+    }
     for (var i = 0; i < shelf.length; i++) {
       var shown = i >= shelfFirst && i < shelfFirst + n;
       tiles[i].style.left = (tileLeft + i * tileStep) + 'px';
@@ -1268,6 +1534,7 @@
 
   /** Scrolls the shelf, one app at a time, so the focused app is shown. */
   function revealShelf() {
+    if (railMode() && APPS_GRID) return;   // the grid shows them all
     var n = Math.min(shelf.length, SHELF_VISIBLE);
     var first = Math.max(0, Math.min(Math.max(shelfFirst, st.shelf - n + 1), Math.min(st.shelf, shelf.length - n)));
     if (first === shelfFirst || !shelf.length) return;
@@ -2103,9 +2370,11 @@
   }
 
   function activate() {
+    if (railMode() && st.zone === Z.SUB) { openMenu(); return; }
+    if (st.zone === Z.MENU) { chooseMenu(); return; }
     switch (st.zone) {
       case Z.TOP:
-        if (st.top < tabsN()) return;
+        if (st.top < tabsN()) { if (railMode() && cards.length) { st.zone = Z.CARDS; updateFocus(); } return; }
         if (topItems[st.top - tabsN()]) topItems[st.top - tabsN()][2]();
         return;
       case Z.CARDS:
@@ -2162,6 +2431,7 @@
    * where Explore does.
    */
   function alignRows() {
+    if (railMode()) return;   // the rail has no rows to line up
     var tabs = $('tabs'), ex = tabs && tabs.children[Trakt.signedIn() ? 1 : 0];
     if (!ex) return;
     var rows = [[].slice.call(tabs.children, Trakt.signedIn() ? 1 : 0)];
@@ -2182,6 +2452,7 @@
   }
 
   function renderSubs() {
+    if (railMode()) { renderDropdowns(); return; }
     var sub = $('subtabs');
     if (!sub) { sub = el('div', '', $('tabs').parentNode); sub.id = 'subtabs'; }
     sub.innerHTML = '';
@@ -2221,6 +2492,9 @@
     if (searchMode) { searchMode = false; searchOpen = false; renderTop(); cards = []; renderCards(); }
     if (i === st.tab) return;
     st.tab = i;
+    st.sort = '';   // each section has its own orders, always the same, from its first
+    st.rev = false;
+    if (railMode()) renderDropdowns();
     // A tab opens at its first pick, its row at the start: at once, as on Android, not sliding from the last tab's place.
     st.card = 0;
     var holder = $('cards');
@@ -2231,8 +2505,118 @@
     holder.style.webkitTransition = holder.style.transition = '';
   }
 
+  /**
+   * The rail's ways: ▲ ▼ along it (a section shows as it's reached), ▶ to the posters; the dropdowns' row ◀ ▶ among
+   * them and ◀ off its start to the rail, ▼ to the posters; ◀ off the first poster to the rail, ▲ to the dropdowns;
+   * an open dropdown ▲ ▼. True when it handled the key.
+   */
+  function railMove(dx, dy) {
+    var tiles = $('tiles').children, cardNodes = $('cards').children, order, at;
+    // The grid: ◀ ▶ along a row (◀ off its start to the rail), ▲ ▼ a row up or down; ▲ off the top to what's above it.
+    if (st.zone === Z.CARDS && cards.length) {
+      var C = gridCols(), col = st.card % C;
+      if (dx) {
+        var to = st.card + dx;
+        if (dx < 0 && col === 0) { st.zone = Z.TOP; st.top = searchMode ? tabsN() : st.tab; }
+        else if (to >= 0 && to < cards.length && Math.floor(to / C) === Math.floor(st.card / C)) st.card = to;
+        return true;
+      }
+      if (dy < 0) {
+        if (st.card >= C) st.card -= C;
+        else if (homeView() && shelf.length) {   // to the apps' last row, the one over this poster
+          var sc2 = shelfCols(), from = (shelfRows() - 1) * sc2, x = centerX(cardNodes[st.card]);
+          st.zone = Z.SHELF;
+          st.shelf = shelf.length - 1;
+          for (var t2 = from; t2 < shelf.length; t2++) if (centerX(tiles[t2]) + 80 >= x) { st.shelf = t2; break; }
+        }
+        else if (searchMode) { st.zone = Z.TOP; st.top = tabsN(); }
+        else st.zone = Z.SUB;
+        return true;
+      }
+      if (dy > 0) {
+        if (st.card + C < cards.length) st.card += C;
+        else if (Math.floor((cards.length - 1) / C) > Math.floor(st.card / C)) st.card = cards.length - 1;   // the last row, shorter
+        return true;
+      }
+    }
+    // Home, top to bottom: the dropdowns, the apps, the favorites, then the drawer.
+    if (homeView()) {
+      if (st.zone === Z.SUB && dy > 0) { st.zone = shelf.length ? Z.SHELF : cards.length ? Z.CARDS : Z.SUB; return true; }
+      if (st.zone === Z.SHELF) {
+        var sc = shelfCols(), scol = st.shelf % sc;
+        if (dx) {
+          var sto = st.shelf + dx;
+          if (dx < 0 && scol === 0) { st.zone = Z.TOP; st.top = st.tab; }
+          else if (sto >= 0 && sto < shelf.length && Math.floor(sto / sc) === Math.floor(st.shelf / sc)) st.shelf = sto;
+          return true;
+        }
+        if (dy < 0) { if (st.shelf >= sc) st.shelf -= sc; else st.zone = Z.SUB; return true; }
+        if (dy > 0 && st.shelf + sc < shelf.length) { st.shelf += sc; return true; }
+        if (dy > 0 && Math.floor((shelf.length - 1) / sc) > Math.floor(st.shelf / sc)) { st.shelf = shelf.length - 1; return true; }
+        if (dy > 0) {
+          if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length, gridCols()) - 1; for (var q = 0; q < Math.min(cards.length, gridCols()); q++) if (centerX(cardNodes[q]) >= centerX(tiles[st.shelf]) - GRID.w / 2) { st.card = q; break; } }
+          else openDrawer();
+          return true;
+        }
+        return false;
+      }
+      if (st.zone === Z.CARDS) {
+        if (dy < 0) { st.zone = shelf.length ? Z.SHELF : Z.SUB; if (shelf.length) st.shelf = nearest(tiles, centerX(cardNodes[st.card])); return true; }
+        if (dy > 0) { openDrawer(); return true; }
+      }
+      if (st.zone === Z.TOP && dx > 0) { st.zone = shelf.length ? Z.SHELF : cards.length ? Z.CARDS : Z.SUB; return true; }
+    }
+    switch (st.zone) {
+      case Z.TOP:
+        order = railOrder();
+        at = order.indexOf(st.top);
+        if (dy) {
+          var to = order[Math.max(0, Math.min(order.length - 1, (at < 0 ? 0 : at) + dy))];
+          if (to < tabsN() && (searchMode || searchOpen)) closeSearch();   // it puts the focus on Search: set it after
+          st.top = to;
+          st.zone = Z.TOP;
+          if (to < tabsN()) selectTab(to);
+        } else if (dx > 0) {
+          if (cards.length) st.zone = Z.CARDS;
+          else if (!searchMode) { st.zone = Z.SUB; st.dd = 0; }
+          else if (shelf.length && !catalog()) st.zone = Z.SHELF;
+        }
+        return true;
+      case Z.SUB:
+        if (dx < 0 && !st.dd) { st.zone = Z.TOP; st.top = st.tab; }
+        else if (dx) st.dd = Math.max(0, Math.min(ddItems().length - (wayLocked() ? 2 : 1), st.dd + dx));   // a locked arrow is skipped
+        else if (dy > 0) {
+          if (cards.length) st.zone = Z.CARDS;
+          else if (spiderShown()) st.zone = Z.SPIDER;
+          else if (shelf.length && !catalog()) st.zone = Z.SHELF;
+        }
+        return true;
+      case Z.MENU:
+        if (dy) st.menu = Math.max(0, Math.min($('ddmenu').children.length - 1, st.menu + dy));
+        return true;
+      case Z.CARDS:
+        if (dy > 0 && catalog()) return true;   // no shelf in the catalog
+        if (dx < 0 && !st.card) { st.zone = Z.TOP; st.top = searchMode ? tabsN() : st.tab; return true; }
+        if (dy < 0) { if (searchMode) { st.zone = Z.TOP; st.top = tabsN(); } else { st.zone = Z.SUB; } return true; }
+        return false;
+      case Z.SPIDER:
+        if (dx < 0) { st.zone = Z.TOP; st.top = st.tab; return true; }
+        if (dy < 0) { st.zone = Z.SUB; return true; }
+        if (dy > 0 && catalog()) return true;
+        return false;
+      case Z.SHELF:
+        if (dy < 0 && !cards.length && !spiderShown()) { st.zone = Z.TOP; st.top = st.tab; return true; }
+        return false;
+      case Z.SEARCH:
+        if (dx < 0) { closeField('searchbar'); st.zone = Z.TOP; st.top = tabsN(); return true; }
+        return false;
+    }
+    return false;
+  }
+
   function move(dx, dy) {
     var tiles = $('tiles').children, cardNodes = $('cards').children;
+    if (railMode() && railMove(dx, dy)) { updateFocus(); return; }
     switch (st.zone) {
       case Z.SHELF:
         if (dx) st.shelf = Math.max(0, Math.min(shelf.length - 1, st.shelf + dx));
@@ -2324,6 +2708,16 @@
   }
 
   function back() {
+    if (st.zone === Z.MENU) { closeMenu(); return; }
+    if (railMode() && catalog() && (st.zone === Z.CARDS || st.zone === Z.SUB || st.zone === Z.SPIDER || st.zone === Z.TOP)) {
+      st.top = 0;   // the catalog's Back: Home, the shortcuts, on its first app
+      selectTab(0);
+      st.zone = shelf.length ? Z.SHELF : Z.CARDS;
+      st.shelf = 0;
+      updateFocus();
+      return;
+    }
+    if (railMode() && st.zone === Z.SUB) { st.zone = cards.length ? Z.CARDS : Z.TOP; st.top = st.tab; updateFocus(); return; }
     if (st.zone === Z.DETAIL) { detailBack(); return; }   // as the page's ← when it has one (a related title's), else it closes
     if (st.zone === Z.EDIT) {
       setClass($('shelfedit'), 'open', false);

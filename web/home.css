@@ -1196,8 +1196,6 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 .card .prog { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: rgba(16, 16, 18, 0.6); overflow: hidden; }
 .card .prog.over-rpdb { bottom: 64px; }
 .card .prog .fill { height: 6px; border-radius: 3px; background: #F5F5F7; }
-.card.seen .img { opacity: 0.4; }
-.card.seen.focus .img { opacity: 0.7; }
 
 /* The details page's top right: the title's buttons, a gap, then Back and the X. */
 #detail .d-top .tip { right: auto; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%); }
@@ -1208,3 +1206,160 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 #detail .d-relinfo.on { opacity: 1; }
 #detail .d-relname { font-size: 34px; font-weight: 700; line-height: 1.15; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-height: 80px; }
 #detail .d-relmeta { margin-top: 12px; font-size: 24px; font-weight: 500; color: rgba(245, 245, 247, 0.7); }
+
+/* MARK: - The rail (with Trakt): the sections down the left as icons, their names out while it has the focus; the
+   section's name and what's in it at the top left, its dropdowns and Clear at the top right. */
+.rail #tabs { left: 46px; top: 236px; height: auto; white-space: normal; }
+.rail #buttons { position: absolute; left: 46px; top: 150px; }
+.rail #quotes { display: none; }
+.tab.rail { display: block; width: 72px; height: 66px; margin: 0 0 8px 0; padding: 0; border-radius: 33px; text-align: left; }
+.tab.rail .mark { position: absolute; left: 22px; top: 19px; width: 28px; height: 28px; background-color: currentColor; opacity: 0.55;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+.tab.rail .label { position: absolute; left: 76px; top: 0; font-size: 28px; font-weight: 500; line-height: 66px; white-space: nowrap; opacity: 0;
+  -webkit-transition: opacity 0.16s; transition: opacity 0.16s; }
+.tab.rail.on .mark, .tab.rail.focus .mark { opacity: 1; }
+.tab.rail.on .label { font-weight: 600; }
+.railopen .tab.rail .label { opacity: 1; }
+.tab.rail.focus, .night .tab.rail.focus { -webkit-transform: none; transform: none; }
+.tab.rail.focus .mark { -webkit-transform: scale(1.18); transform: scale(1.18); }
+/* The current section, while the rail is closed: a small bar left of its icon. */
+.tab.rail.on::before { content: ''; position: absolute; left: -14px; top: 23px; width: 4px; height: 20px; border-radius: 2px; background: currentColor; }
+/* Open, the rail lays a shade over the posters' left so its names read. */
+#top::before { content: ''; position: absolute; left: 0; top: 0; width: 620px; height: 860px; opacity: 0; pointer-events: none; z-index: 0;
+  background: -webkit-linear-gradient(left, rgba(16, 16, 18, 0.92), rgba(16, 16, 18, 0.82) 55%, rgba(16, 16, 18, 0));
+  background: linear-gradient(to right, rgba(16, 16, 18, 0.92), rgba(16, 16, 18, 0.82) 55%, rgba(16, 16, 18, 0));
+  -webkit-transition: opacity 0.18s; transition: opacity 0.18s; }
+.railopen #top::before { opacity: 1; }
+.rail #tabs, .rail #buttons { z-index: 3; }
+
+/* The heading: the section's name, and under it what's in it. */
+.rail #title { display: block; left: 184px; top: 62px; font-size: 50px; font-weight: 700; }
+#subtitle { display: none; position: absolute; left: 186px; top: 126px; font-size: 25px; font-weight: 500; white-space: nowrap; color: #6E6E73; }
+.rail #subtitle { display: block; }
+.night #subtitle { color: rgba(245, 245, 247, 0.62); }
+.rail #info { left: 184px; }
+
+/* The dropdowns at the top right: what each holds, a chevron; Clear after them while a filter is on. */
+.rail #subtabs { left: auto; right: 80px; top: 66px; height: 60px; }
+.searching #subtabs { display: none; }
+#subtabs .dd { position: relative; display: inline-block; height: 56px; margin-left: 14px; padding: 0 54px 0 26px; border-radius: 28px;
+  background: rgba(0, 0, 0, 0.06); color: #3A3A3C; font-size: 25px; font-weight: 600; line-height: 56px; white-space: nowrap;
+  -webkit-transition: -webkit-transform 0.18s, background-color 0.15s; transition: transform 0.18s, background-color 0.15s; }
+#subtabs .dd .mark { position: absolute; right: 22px; top: 21px; width: 18px; height: 14px; background-color: currentColor;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+#subtabs .dd.dd-clear { padding: 0 26px 0 58px; }
+#subtabs .dd.dd-clear .mark { left: 22px; right: auto; top: 16px; width: 24px; height: 24px; }
+#subtabs .dd.focus { background: #FFF; color: #1D1D1F; -webkit-transform: scale(1.06); transform: scale(1.06); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3); }
+.night #subtabs .dd { background: rgba(255, 255, 255, 0.12); color: rgba(245, 245, 247, 0.9); }
+.night #subtabs .dd.focus { background: #FFF; color: #1D1D1F; }
+
+/* An open dropdown: its choices under its button, the one in use ticked. */
+#ddmenu { display: none; position: absolute; top: 136px; min-width: 300px; padding: 10px 0; border-radius: 22px; z-index: 6;
+  background: rgba(28, 28, 30, 0.96); box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+#ddmenu.open { display: block; }
+#ddmenu .opt { position: relative; height: 56px; padding: 0 30px 0 62px; font-size: 25px; font-weight: 500; line-height: 56px; white-space: nowrap; color: rgba(245, 245, 247, 0.8); }
+#ddmenu .opt .mark { position: absolute; left: 24px; top: 18px; width: 22px; height: 20px; background-color: currentColor; opacity: 0;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+#ddmenu .opt.on .mark { opacity: 1; }
+#ddmenu .opt.on { font-weight: 600; color: #FFF; }
+#ddmenu .opt.focus { background: #FFF; color: #1D1D1F; }
+
+/* The order's way: A→Z as it comes, Z→A the other way round (no chevron: OK turns it). */
+#subtabs .dd.dd-dir { padding: 0 24px; margin-left: 8px; }
+
+/* Home holds the shelf; the other sections are the catalog, posters only. */
+.catalog #tiles, .catalog #platter { opacity: 0; visibility: hidden; }
+
+/* The rail without a shade: only the focused section's name comes out, on its own small plate (as the dropdowns'). */
+#top::before { display: none; }
+.railopen .tab.rail .label { opacity: 0; }
+.tab.rail .label { left: 70px; top: 8px; height: 50px; padding: 0 22px; border-radius: 25px; line-height: 50px; font-size: 26px; font-weight: 600;
+  background: rgba(44, 44, 46, 0.96); color: #FFF; box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35); }
+.railopen .tab.rail.focus .label { opacity: 1; }
+.night .tab.rail { color: rgba(245, 245, 247, 0.62); }
+.night .tab.rail.on, .night .tab.rail.focus { color: #FFF; }
+
+/* The order's way: an arrow, its words as a tip under it while focused. */
+#subtabs .dd.dd-dir { width: 56px; padding: 0; }
+#subtabs .dd.dd-dir .mark { display: block; left: 19px; right: auto; top: 16px; width: 18px; height: 24px; }
+#subtabs .dd .tip { position: absolute; right: 0; top: 66px; font-size: 19px; font-weight: 600; white-space: nowrap; opacity: 0; color: #F5F5F7;
+  -webkit-transition: opacity 0.14s; transition: opacity 0.14s; }
+#subtabs .dd.focus .tip { opacity: 1; }
+#subtabs .dd.dd-clear { margin-left: 0; margin-right: 6px; }
+
+/* The details page's related row: smaller posters, a little more room under the cast; the focused one's name and
+   line as the catalog's (#info). */
+#detail .d-rel { top: 846px; }
+#detail .d-relcard { width: 96px; height: 144px; margin: 0 16px 0 0; border-radius: 10px; }
+#detail .d-relcard:nth-child(3n) { margin-right: 16px; }
+#detail .d-relrow { height: 152px; }
+#detail .d-relinfo { top: 74px; width: 760px; }
+#detail .d-relname { font-size: 31px; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-height: none; }
+#detail .d-relmeta { margin-top: 6px; font-size: 25px; font-weight: 500; color: rgba(245, 245, 247, 0.62); }
+#subtabs .dd { vertical-align: top; }
+
+/* Home with the rail: the apps right under the heading, the favorites under them. */
+
+/* Each dropdown one width, whatever it holds (the longest Portuguese choice fits): picking one moves none of them. */
+#subtabs .dd.dd-kind { width: 274px; }
+#subtabs .dd.dd-genre { width: 306px; }
+#subtabs .dd.dd-sort { width: 398px; }
+#subtabs .dd.dd-kind, #subtabs .dd.dd-genre, #subtabs .dd.dd-sort { padding-right: 52px; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+
+/* Focused, a dropdown only takes the light color: it doesn't grow into its neighbours. */
+#subtabs .dd.focus { -webkit-transform: none; transform: none; }
+
+/* The grid: the posters' clip under the heading, smaller corners and marks, no names under them (the heading has
+   the focused one's), no #info. */
+#gridclip { position: absolute; left: 0; width: 1920px; overflow: hidden; }
+.rail #info { display: none !important; }
+.rail .card { -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.15); transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.15); }
+.rail .card .img, .rail .card .img::after { border-radius: 14px; }
+.rail .card .name, .rail .card .meta { display: none; }
+.rail .card.focus { -webkit-transform: translateY(-4px) scale(1.06); transform: translateY(-4px) scale(1.06); }
+.rail .card .prog.over-rpdb { bottom: 44px; }
+.rail .card .prog { left: 10px; right: 10px; bottom: 10px; height: 5px; }
+.rail .card .prog .fill { height: 5px; }
+.rail .card.loadmore { background: none; }
+#subtitle.pick { color: #1D1D1F; }
+.night #subtitle.pick { color: #F5F5F7; }
+#subtitle .pname { font-weight: 700; }
+#subtitle .pmeta { font-weight: 500; opacity: 0.62; }
+#subtitle { max-width: 1000px; overflow: hidden; text-overflow: ellipsis; }
+
+/* With the rail, a focused app's name is in the heading's line, as a poster's: none under the tile. */
+.rail .tile .name { display: none; }
+
+/* The heading's line under the name, below the dropdowns' height: a long title and line run under them, not into
+   them. */
+.rail #title { top: 56px; }
+#subtitle { top: 144px; max-width: 1480px; line-height: 30px; }
+
+/* Trakt's own lists (Explore's, Discover's Recommended): the arrow stays where it is, dimmed, and the focus skips it. */
+#subtabs .dd.dd-dir.locked { opacity: 0.32; }
+
+/* The details page's poster carries the catalog's mark of its app. */
+#detail .d-poster .badge { position: absolute; right: 14px; top: 14px; width: 60px; height: 60px; border-radius: 30px; background: rgba(16, 16, 18, 0.62); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+#detail .d-poster .badge .mark { position: absolute; left: 13px; top: 13px; right: 13px; bottom: 13px; background-color: #FFF;
+  -webkit-mask-size: contain; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; mask-size: contain; mask-position: center; mask-repeat: no-repeat; }
+#detail .d-poster .badge .letter { position: absolute; left: 0; right: 0; top: 0; line-height: 60px; text-align: center; font-size: 27px; font-weight: 700; color: #FFF; }
+
+/* Watched: a dark shade over the poster (transparency alone hardly shows on the dark screen), lighter when focused. */
+.card .dim { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(8, 8, 10, 0.7); -webkit-transition: opacity 0.17s; transition: opacity 0.17s; }
+.card.seen.focus .dim { opacity: 0.55; }
+
+/* The progress bar on RPDB's ratings strip's top edge, across the poster: the strip is the poster's bottom 9.9%
+   (85 of RPDB's 859 rows), and the poster is drawn bottom-aligned. */
+.rail .card .prog.over-rpdb { left: 0; right: 0; bottom: 9.9%; height: 5px; border-radius: 0; background: rgba(16, 16, 18, 0.55); }
+.rail .card .prog.over-rpdb .fill { border-radius: 0; }
+/* Its top on the strip's top edge (over the strip, so no gap can open whatever the TV rounds the 9.9% to). */
+.rail .card .prog.over-rpdb { -webkit-transform: translateY(100%); transform: translateY(100%); }
+
+/* A related title already watched: the catalog's shade. */
+#detail .d-relcard { position: relative; overflow: hidden; }
+#detail .d-relcard .dim { position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(8, 8, 10, 0.7); }
+#detail .d-relcard.seen.focus .dim { opacity: 0.55; }
+
+/* Home's apps, focused: only their color changes (their name is in the heading's line); they don't lift or grow. */
+.rail .tile.focus, .rail .tile.focus .look { -webkit-transform: none !important; transform: none !important; }
+.rail .tile { -webkit-transition: none; transition: none; }
