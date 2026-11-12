@@ -1208,8 +1208,9 @@
     setClass(d, 'open', true);
     detailRelated = [];
     var seq = ++detailSeq;
-    var castRow = {sel: '.d-who', items: [], act: openPerson};
-    detailRows = [castRow, {sel: '.d-relcard', items: detailRelated, act: function (x) { openDetails(x, true); }, info: relatedInfo}];
+    var castRow = {sel: '.d-who', items: [], act: openPerson, base: tr('details|Cast'), label: personLabel};
+    var relRow = {sel: '.d-relcard', items: detailRelated, act: function (x) { openDetails(x, true); }, base: tr('details|More like this'), label: titleLabel};
+    detailRows = [castRow, relRow];
     Data.fullDetails(p, function (info) {
       if (seq !== detailSeq || !info) return;
       var bits = [];
@@ -1220,11 +1221,15 @@
       text.textContent = info.overview;
       setClass(text, 'short', box.firstChild.offsetHeight > 90);   // a name in two lines: a line less of overview
       if (info.people.length) {
-        el('div', 'd-relhead', people, tr('details|Cast'));
+        castRow.head = el('div', 'd-relhead', people, tr('details|Cast'));
         castRow.items = info.people;   // OK on one: their page
         var row = el('div', 'd-row', people);
         for (var i = 0; i < info.people.length; i++) {
-          var c = info.people[i], who = el('div', 'd-who' + (c.maker ? ' maker' : ''), row), face = el('div', 'd-face', who);
+          var c = info.people[i];
+          // Between who made it and the cast, a thin line of its own (as part of the first actor it flickered when
+          // their photo grew on focus).
+          if (i && !c.maker && info.people[i - 1].maker) el('div', 'd-sep', row);
+          var who = el('div', 'd-who' + (c.maker ? ' maker' : ''), row), face = el('div', 'd-face', who);
           if (c.photo) face.style.backgroundImage = 'url(' + c.photo + ')';
           else face.textContent = String(c.name).charAt(0);
           el('div', 'd-nm', who, c.name);
@@ -1234,9 +1239,9 @@
     });
     Data.related(p, function (list) {
       if (seq !== detailSeq || !list.length) return;
-      detailRelated = list.slice(0, 8);
-      detailRows[1].items = detailRelated;
-      el('div', 'd-relhead', rel, tr('details|More like this'));
+      detailRelated = list.slice(0, 12);
+      relRow.items = detailRelated;
+      relRow.head = el('div', 'd-relhead', rel, tr('details|More like this'));
       var row = el('div', 'd-relrow', rel);
       for (var i = 0; i < detailRelated.length; i++) {
         // TMDB's plain posters: RPDB's scores are too small to read at this size
@@ -1244,11 +1249,6 @@
         rc.style.backgroundImage = 'url(' + Data.image(detailRelated[i].poster, 'w185') + ')';
         if (Trakt.signedIn() && Data.watched(detailRelated[i])) { setClass(rc, 'seen', true); el('div', 'dim', rc); }   // as the catalog's
       }
-      // Right of the last one, the focused one's name and line, as the catalog shows a pick's (genre, length).
-      var side = el('div', 'd-relinfo', rel);
-      side.style.left = (detailRelated.length * REL_STEP + 20) + 'px';
-      el('div', 'd-relname', side);
-      el('div', 'd-relmeta', side);
       updateDetailFocus();
     });
     updateDetailFocus();
@@ -1299,19 +1299,16 @@
     var seq = ++detailSeq, films = [], shown = FILMS_PAGE;
     var filmRow = {sel: '.d-filmcard', items: [], act: function (x) {
       if (x.more) { shown += FILMS_PAGE; drawFilms(); updateDetailFocus(); } else openDetails(x, true);
-    }, info: function (dd, x) {   // the head says which one is focused
-      var head = dd.querySelector('.d-films .d-relhead');
-      if (head) head.textContent = tr('details|Filmography') + (x && !x.more ? '  ·  ' + x.title + (x.date ? ' (' + x.date.slice(0, 4) + ')' : '') : '');
-    }, scroll: function (dd, i) {   // the row slides to keep the focused one on screen
+    }, base: tr('details|Filmography'), label: titleLabel, scroll: function (dd, i) {   // the row slides to keep the focused one on screen
       var r = dd.querySelector('.d-filmrow');
       if (r) r.style.webkitTransform = r.style.transform = 'translateX(' + (-Math.max(0, i - 10) * FILM_STEP) + 'px)';
     }};
-    var peopleRow = {sel: '.d-relpeople .d-who', items: [], act: openPerson};
+    var peopleRow = {sel: '.d-relpeople .d-who', items: [], act: openPerson, base: tr('details|Related people'), label: personLabel};
     detailRows = [filmRow, peopleRow];
     function drawFilms() {
       filmsBox.innerHTML = '';
       if (!films.length) return;
-      el('div', 'd-relhead', filmsBox, tr('details|Filmography'));
+      filmRow.head = el('div', 'd-relhead', filmsBox, tr('details|Filmography'));
       var clip = el('div', 'd-filmclip', filmsBox), row = el('div', 'd-filmrow', clip);
       filmRow.items = films.slice(0, shown);
       if (films.length > shown) filmRow.items.push({more: true});
@@ -1343,7 +1340,7 @@
       updateDetailFocus();
       Data.relatedPeople(info, function (list) {
         if (seq !== detailSeq || !list.length) return;
-        el('div', 'd-relhead', rel, tr('details|Related people'));
+        peopleRow.head = el('div', 'd-relhead', rel, tr('details|Related people'));
         var r = el('div', 'd-row', rel);
         peopleRow.items = list;
         for (var i = 0; i < list.length; i++) {
@@ -1366,36 +1363,39 @@
       for (var i = 0; i < rows[r].length; i++) setClass(rows[r][i], 'focus', st.zone === Z.DETAIL && df.row === r && df.i === i);
     }
     for (var q = 0; q < detailRows.length; q++) {
-      var row = detailRows[q], on = st.zone === Z.DETAIL && df.row === q + 1;
-      if (row.info) row.info(d, on ? row.items[df.i] : null);
+      var row = detailRows[q], on = st.zone === Z.DETAIL && df.row === q + 1, x = on ? row.items[df.i] : null;
+      if (row.head) {   // the row's head, then what's focused in it (the row shows only pictures)
+        var said = x && row.label ? row.label(x) : '';
+        row.head.textContent = row.base + (said ? '  ·  ' + said : '');
+      }
       if (row.scroll) row.scroll(d, on ? df.i : 0);
     }
   }
 
 
   var REL_STEP = 112;   // a related poster (96) and its gap
-  var relInfo = {};   // a related title's line, by kind:id, fetched once when it's focused
+  var relInfo = {};
 
-  function relatedInfo(d, p) {
-    var side = d.querySelector('.d-relinfo');
-    if (!side) return;
-    setClass(side, 'on', !!p);
-    if (!p) return;
-    var k = p.kind + ':' + p.id;
-    side.firstChild.textContent = p.title || '';
-    side.lastChild.textContent = relInfo[k] || '';
-    if (relInfo[k] !== undefined) return;
-    relInfo[k] = '';
-    Data.fullDetails(p, function (info) {
-      if (!info) return;
-      var bits = [];   // as everywhere: year, genres, length or seasons
-      if (info.year) bits.push(info.year);
-      if (info.genres.length) bits.push(info.genres.join(', '));
-      if (info.length) bits.push(info.length);
-      relInfo[k] = bits.join(' · ');
-      if (df.row === 1 && detailRelated[df.i] === p) side.lastChild.textContent = relInfo[k];
-    });
+  /** A title's name and line (year, genres, length) for a row's head; the line fetched once, then the head redrawn. */
+  function titleLabel(x) {
+    if (!x || x.more) return '';
+    var k = x.kind + ':' + x.id;
+    if (relInfo[k] === undefined) {
+      relInfo[k] = '';
+      Data.fullDetails(x, function (info) {
+        if (!info) return;
+        var bits = [];
+        if (info.year) bits.push(info.year);
+        if (info.genres.length) bits.push(info.genres.join(', '));
+        if (info.length) bits.push(info.length);
+        relInfo[k] = bits.join(' · ');
+        updateDetailFocus();
+      });
+    }
+    return (x.title || '') + (relInfo[k] ? '  ·  ' + relInfo[k] : '');
   }
+
+  function personLabel(c) { return c ? c.name + (c.role ? '  ·  ' + c.role : '') : ''; }   // a related title's line, by kind:id, fetched once when it's focused
 
   function detailCount(r) { return r === 0 ? detailTop().length : detailRows[r - 1] ? detailRows[r - 1].items.length : 0; }
 

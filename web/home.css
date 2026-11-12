@@ -1380,3 +1380,50 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 #detail .d-filmcard.more { width: 56px; background: rgba(255, 255, 255, 0.1); }
 #detail .d-filmcard.more .sym { position: absolute; left: 16px; top: 72px; width: 24px; height: 24px; }
 #detail .d-relpeople .d-who { width: 128px; }
+
+/* The details page's rows show only pictures: what's focused is named beside the row's head. */
+#detail .d-who .d-nm, #detail .d-who .d-rl { display: none; }
+#detail .d-who { width: 104px; margin-right: 16px; }
+#detail .d-who.maker + .d-who:not(.maker) { margin-left: 36px; }
+#detail .d-who.maker + .d-who:not(.maker)::before { left: -27px; top: 10px; height: 76px; }
+#detail .d-relpeople .d-who { width: 104px; }
+#detail .d-relhead { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1680px; }
+#detail .d-people { top: 640px; }
+#detail .d-rel { top: 820px; }
+
+/* The rows spread evenly in the room under the poster (it ends at 600): the same gap above each and under the last.
+   A title's: cast (40 + 96) and related titles (40 + 144); a person's: films (40 + 176) and people (40 + 96). */
+#detail .d-people { top: 653px; }
+#detail .d-rel { top: 842px; }
+#detail .d-films { top: 643px; }
+#detail .d-rel.d-relpeople { top: 902px; }
+
+/* The line between who made it and the cast: its own element, still while the photos around it grow. */
+#detail .d-who.maker + .d-who:not(.maker)::before { display: none; }
+#detail .d-who.maker + .d-who:not(.maker) { margin-left: 0; }
+#detail .d-sep { display: inline-block; vertical-align: top; width: 1px; height: 76px; margin: 10px 26px 0 10px; background: rgba(245, 245, 247, 0.28); }
+
+/* A little lower, both pages: the last row ends close to the bottom. */
+#detail .d-people { top: 673px; }
+#detail .d-rel { top: 862px; }
+#detail .d-films { top: 663px; }
+#detail .d-rel.d-relpeople { top: 916px; }
+
+/* Balanced: about the same room above each row and under the last (~50: the TV's edge isn't safe closer). */
+#detail .d-people { top: 660px; }
+#detail .d-rel { top: 848px; }
+#detail .d-films { top: 646px; }
+#detail .d-rel.d-relpeople { top: 892px; }
+
+/* Right under the poster and the overview (they end at 600): the rows start close to them, and the related titles'
+   posters are the films' size (112 x 168). */
+#detail .d-people { top: 620px; }
+#detail .d-rel { top: 790px; }
+#detail .d-relcard { width: 112px; height: 168px; margin: 0 20px 0 0; }
+#detail .d-relcard:nth-child(3n) { margin-right: 20px; }
+#detail .d-relrow { height: 176px; padding-top: 4px; }
+#detail .d-films { top: 620px; }
+#detail .d-rel.d-relpeople { top: 868px; }
+
+/* Each row's head stays where it is; its pictures come 12 lower, for more room between the two. */
+#detail .d-relhead { margin-bottom: 22px; }
