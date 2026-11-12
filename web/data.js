@@ -543,7 +543,7 @@ var Data = (function () {
     function pick(found) {
       if (!found) { done(null); return; }
       var app = appFor(found.app);
-      done(app && usable(found.app) ? {app: app, link: found.link} : null);
+      done(app && usable(found.app) ? {app: app, link: found.link, service: found.app} : null);
     }
     if (links[id] !== undefined) { pick(links[id]); return; }
     var answered = false;
@@ -973,7 +973,7 @@ var Data = (function () {
     if (!Trakt.signedIn() || fetchingTrakt || !KEY || !installed.length) return;
     var t = Date.now();
     // Lists kept from before they carried Trakt's genres (or trending) are fetched again at once.
-    if (tk.lists && tk.lists.v === 7 && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
+    if (tk.lists && tk.lists.v === 8 && t - tk.at < 15 * 60000 && t >= tk.at) { detailTrakt(); return; }
     fetchingTrakt = true;
     Trakt.lists(function (err, lists) {
       fetchingTrakt = false;
@@ -1206,6 +1206,20 @@ var Data = (function () {
     /** Still fetching or detailing picks: an empty row may fill yet (home.js shows dots, not "nothing here"). */
     busy: function () { return !!(fetchingRecs || fetchingTrakt || detailingTrakt || checkingMore); },
     isFav: function (p) { return !!marks.fav[markKey(p)]; },
+    isTrashed: function (p) { return !!marks.trash[markKey(p)]; },
+    /** Watched on Trakt (all of it, for a show). */
+    watched: function (p) { return !!(tk.lists && tk.lists.watched[markKey(p)]); },
+    /** How far in on Trakt, 0 to 1: a paused movie's or episode's point, else a show's episodes watched of those out. */
+    progressOf: function (p) {
+      var L = tk.lists, k = markKey(p);
+      for (var i = 0; L && i < L.progress.length; i++) {
+        var g = L.progress[i];
+        if (g.key !== k) continue;
+        if (g.paused && g.pct > 1) return Math.min(1, g.pct / 100);   // 1% is only "begun here" (Data.started)
+        if (g.aired > 0) return Math.min(1, g.done / g.aired);
+      }
+      return 0;
+    },
     favCount: function () { var n = 0; for (var k in marks.fav) if (Object.prototype.hasOwnProperty.call(marks.fav, k)) n++; return n; },
     /** Signed in or out of Trakt: its lists are fetched again. */
     traktChanged: function () { tk.at = 0; if (!Trakt.signedIn()) tk = {lists: null, at: 0, pool: {}}; saveTrakt(); refreshTrakt(); changed(); },
@@ -1498,9 +1512,9 @@ var Trakt = (function () {
   /** In steps, one request at a time: each part failing on its own leaves the rest. */
   function lists(done) {
     // genres: Trakt's genre slugs of each title (extended=full), so a genre filter needs no TMDB details first.
-    // v: 7 with Rewatch (lists kept from before are fetched again).
+    // v: 8 with Trakt's progress (how far in, on the poster; lists kept from before are fetched again).
     var hidden = {};
-    var out = {v: 7, upcoming: [], progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}}, shows = [], at = {};
+    var out = {v: 8, upcoming: [], progress: [], watched: {}, watchlist: [], recommended: [], trending: [], genres: {}}, shows = [], at = {};
     function full(path) { return path + (path.indexOf('?') >= 0 ? '&' : '?') + 'extended=full'; }
     function genresOf(item, type, k) { var o = item && item[type] ? item[type] : item; if (o && o.genres) out.genres[k] = o.genres; }
     function has(k) { for (var i = 0; i < out.progress.length; i++) if (out.progress[i].key === k) return true; return false; }
@@ -1526,7 +1540,7 @@ var Trakt = (function () {
           if (!k || has(k) || (at[k] && at[k] >= a[i].paused_at)) continue;   // watched since it was paused
           genresOf(a[i], movie ? 'movie' : 'show', k);
           if (hidden[k]) continue;   // hidden from progress on Trakt (Stop watching)
-          out.progress.push({key: k, season: ep ? ep.season : 0, number: ep ? ep.number : 0, paused: true, pid: a[i].id});
+          out.progress.push({key: k, season: ep ? ep.season : 0, number: ep ? ep.number : 0, paused: true, pid: a[i].id, pct: a[i].progress || 0});
         }
         next();
       });
@@ -1657,7 +1671,7 @@ var Trakt = (function () {
       var s = list[i++];
       get('/shows/' + s.trakt + '/progress/watched?specials=false&count_specials=false', function (err, p) {
         var n = p && p.next_episode;
-        if (!err && n && p.completed < p.aired) found.push({key: s.key, season: n.season, number: n.number, paused: false});
+        if (!err && n && p.completed < p.aired) found.push({key: s.key, season: n.season, number: n.number, paused: false, done: p.completed, aired: p.aired});
         one();
       });
     })();

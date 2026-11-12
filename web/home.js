@@ -712,6 +712,13 @@
       el('div', 'layer back', img);
       badge(p, img);
       airBadge(p, img);
+      // How far in on Trakt: a thin bar over RPDB's ratings strip; watched ones faded (not in Rewatch, all watched there).
+      var far = Trakt.signedIn() ? Data.progressOf(p) : 0;
+      if (far > 0) {
+        var bar = el('div', 'prog' + (CONFIG.rpdbKey && p.imdb ? ' over-rpdb' : ''), img);
+        el('div', 'fill', bar).style.width = Math.max(4, Math.round(far * 100)) + '%';
+      }
+      if (Trakt.signedIn() && dataTab() !== 4 && Data.watched(p)) setClass(card, 'seen', true);
       el('div', 'name', card, p.title);
       if (p.meta) el('div', 'meta', card, p.meta);
       hover(card, Z.CARDS, c);
@@ -855,21 +862,29 @@
   // goes through them before the shelf). In a Trakt tab: Favorite (Unfavorite once it is) and Delete; in the favorites:
   // Unfavorite and Delete; in the bin: Favorite and Restore.
 
-  function actionsFor() {
-    var p = cards[st.card], t = searchMode ? null : dataTab();   // search results: as in a Trakt tab, whatever tab is under them
-    if (!Trakt.signedIn() || !p || p.more) return [];
-    var more = ['details', 'eye', tr('action|Details')];   // the title's page, first
-    var seen = ['watched', 'check', tr('action|Mark watched')];   // on Trakt: a movie, or a show's every episode
-    if (t === 'trash') return [more, seen, ['fav', 'heart', tr('action|Favorite')], ['restore', 'restore', tr('action|Restore')]];
-    if (t === 'fav') return [more, seen, ['unfav', 'unheart', tr('action|Unfavorite')], ['trash', 'trash', tr('action|Delete')]];
-    var acts = t === 4 ? [more] : [more, seen];   // Rewatch: watched already
-    if (t === 2) acts.push(['drop', 'block', tr('action|Stop watching')]);   // Continue only
-    // Trakt's watchlist: + where it isn't on it yet (not in Continue: being watched already), - in Watchlist's own tab.
-    if (t === 3) acts.push(['unlist', 'remove', tr('action|Remove from watchlist')]);
-    else if (t !== 2 && !Data.inWatchlist(p)) acts.push(['list', 'add', tr('details|Want to watch')]);
-    return acts.concat([Data.isFav(p) ? ['unfav', 'unheart', tr('action|Unfavorite')] : ['fav', 'heart', tr('action|Favorite')],
-      ['trash', 'trash', tr('action|Delete')]]);
+  /** Nothing under the posters any more: a title's buttons are on its page (detailActs). */
+  function actionsFor() { return []; }
+
+  /**
+   * The page's buttons, at its top right before Back and the X: Play, then what changes its Trakt state (watched, stop
+   * watching in Continue, the watchlist's + or -), then what's kept here (favorite or not, delete or restore). A pair
+   * shows one of its two, by the title's state; the tab it was opened from (none for a related title) adds Continue's.
+   */
+  function detailActs(p) {
+    var t = detailStack.length > 1 || searchMode ? null : dataTab(), out = [];
+    if (!p) return out;
+    if (pickTarget(p)) out.push(['play', 'play', tr('action|Watch')]);
+    if (Trakt.signedIn()) {
+      if (t !== 4 && !Data.watched(p)) out.push(['watched', 'check', tr('action|Mark watched')]);
+      if (t === 2) out.push(['drop', 'block', tr('action|Stop watching')]);
+      if (Data.inWatchlist(p)) out.push(['unlist', 'remove', tr('action|Remove from watchlist')]);
+      else if (t !== 2) out.push(['list', 'add', tr('details|Want to watch')]);
+    }
+    out.push(Data.isFav(p) ? ['unfav', 'unheart', tr('action|Unfavorite')] : ['fav', 'heart', tr('action|Favorite')]);
+    out.push(Data.isTrashed(p) ? ['restore', 'restore', tr('action|Restore')] : ['trash', 'trash', tr('action|Delete')]);
+    return out;
   }
+
 
   /**
    * Under the posters, at the screen's left edge (not the poster's): the focused title's name and line, and right of
@@ -917,14 +932,15 @@
   function openDetails(p, push) {
     if (!push) detailStack = [];
     detailStack.push(p);
-    df = {row: 0, i: detailTop().length - 1};   // the X
+    df = {row: 0, i: 0};   // Play (else the first button)
     renderDetail();
     st.zone = Z.DETAIL;
     updateFocus();
   }
 
   function detailTop() {
-    var out = [];
+    var out = detailActs(detailStack[detailStack.length - 1]);
+    if (out.length) out[out.length - 1].gap = true;   // a space between the title's buttons and the page's own
     if (detailStack.length > 1) out.push(['back', 'back', tr('details|Back')]);
     out.push(['close', 'close', tr('details|Close')]);
     return out;
@@ -937,13 +953,7 @@
     var back = el('div', 'back', d);
     if (p.backdrop) back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'w1280') + ')';
     el('div', 'shade', d);
-    var top = detailTop();
-    for (var t = 0; t < top.length; t++) {
-      var x = el('div', 'close d-top', d), m = el('span', 'mark', x);
-      x.style.left = (1772 - 92 * (top.length - 1 - t)) + 'px';
-      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + top[t][1] + '.svg)';
-      el('div', 'tip', x, top[t][2]);
-    }
+    renderDetailTop(d);
     var art = Data.poster(p, 'w500') || (p.poster ? Data.image(p.poster, 'w500') : '');
     var poster = el('div', 'd-poster', d);
     if (art) { poster.style.backgroundImage = 'url(' + art + ')'; if (CONFIG.rpdbKey) poster.style.backgroundPosition = '50% 100%'; }
@@ -980,16 +990,40 @@
     });
     Data.related(p, function (list) {
       if (seq !== detailSeq || !list.length) return;
-      detailRelated = list.slice(0, 11);
+      detailRelated = list.slice(0, 8);
       el('div', 'd-relhead', rel, tr('details|More like this'));
       var row = el('div', 'd-relrow', rel);
       for (var i = 0; i < detailRelated.length; i++) {
         // TMDB's plain posters: RPDB's scores are too small to read at this size
         el('div', 'd-relcard', row).style.backgroundImage = 'url(' + Data.image(detailRelated[i].poster, 'w185') + ')';
       }
+      // Right of them, the focused one's name and line (year, genres, length), as the screen shows a pick's.
+      var side = el('div', 'd-relinfo', rel);
+      el('div', 'd-relname', side);
+      el('div', 'd-relmeta', side);
       updateDetailFocus();
     });
     updateDetailFocus();
+  }
+
+  /** The top right's buttons, right to left from the X, with a gap after the title's own (detailTop). */
+  function renderDetailTop(d) {
+    var old = d.querySelectorAll('.d-top');
+    for (var o = 0; o < old.length; o++) old[o].parentNode.removeChild(old[o]);
+    var top = detailTop(), x0 = 1772;
+    for (var t = top.length - 1; t >= 0; t--) {
+      var x = el('div', 'close d-top' + (top[t][0] === 'close' ? ' x' : ''), d), m = el('span', 'mark', x);
+      if (top[t].gap) x0 -= 28;
+      x.style.left = x0 + 'px';
+      x0 -= 92;
+      m.style.webkitMaskImage = m.style.maskImage = 'url(icons/glyph-' + top[t][1] + '.svg)';
+      el('div', 'tip', x, top[t][2]);
+    }
+    // In document order left to right, as the focus counts them.
+    var nodes = d.querySelectorAll('.d-top'), list = [];
+    for (var n = 0; n < nodes.length; n++) list.push(nodes[n]);
+    list.reverse();
+    for (var r = 0; r < list.length; r++) d.appendChild(list[r]);
   }
 
   function updateDetailFocus() {
@@ -999,6 +1033,30 @@
     for (var r = 0; r < rows.length; r++) {
       for (var i = 0; i < rows[r].length; i++) setClass(rows[r][i], 'focus', st.zone === Z.DETAIL && df.row === r && df.i === i);
     }
+    relatedInfo(d, st.zone === Z.DETAIL && df.row === 1 ? detailRelated[df.i] : null);
+  }
+
+  var relInfo = {};   // a related title's line, by kind:id, fetched once when it's focused
+
+  function relatedInfo(d, p) {
+    var side = d.querySelector('.d-relinfo');
+    if (!side) return;
+    setClass(side, 'on', !!p);
+    if (!p) return;
+    var k = p.kind + ':' + p.id;
+    side.firstChild.textContent = p.title || '';
+    side.lastChild.textContent = relInfo[k] || '';
+    if (relInfo[k] !== undefined) return;
+    relInfo[k] = '';
+    Data.fullDetails(p, function (info) {
+      if (!info) return;
+      var bits = [];
+      if (info.year) bits.push(info.year);
+      if (info.genres.length) bits.push(info.genres.join(', '));
+      if (info.length) bits.push(info.length);
+      relInfo[k] = bits.join(' · ');
+      if (df.row === 1 && detailRelated[df.i] === p) side.lastChild.textContent = relInfo[k];
+    });
   }
 
   function detailMove(dx, dy) {
@@ -1011,7 +1069,36 @@
 
   function detailActivate() {
     if (df.row === 1) { if (detailRelated[df.i]) openDetails(detailRelated[df.i], true); return; }
-    if (detailTop()[df.i][0] === 'back') detailBack(); else closeDetails();
+    var what = detailTop()[df.i] && detailTop()[df.i][0];
+    if (what === 'back') detailBack();
+    else if (what === 'close') closeDetails();
+    else if (what) detailAction(what);
+  }
+
+  /**
+   * A button on the page, for its title: Play opens it (the page closes); the rest change its state here and on Trakt,
+   * and the page stays with its buttons redrawn (the focus on the same place), unless it left the tab it came from.
+   */
+  function detailAction(what) {
+    var p = detailStack[detailStack.length - 1];
+    if (!p) return;
+    if (what === 'play') {
+      var target = pickTarget(p);
+      if (!target) return;
+      closeDetails();
+      openPick(p, target);
+      return;
+    }
+    function failed(err) { if (err) toast(trf("trakt|Trakt didn't take it: {error}", {error: err.message})); }
+    if (what === 'list' || what === 'unlist') Data.setWatchlist(p, what === 'list', failed);
+    else if (what === 'watched' || what === 'drop') Data.traktMark(p, what, failed);
+    else Data.mark(p, what);
+    cards = [];
+    renderCards();
+    var d = $('detail');
+    if (d) renderDetailTop(d);
+    df.i = Math.min(df.i, detailTop().length - 1);
+    updateDetailFocus();
   }
 
   /** Back on a page: the page opened before, then the screen. */
@@ -1029,8 +1116,7 @@
     detailSeq++;
     detailStack = [];
     setClass($('detail'), 'open', false);
-    st.zone = actionsFor().length ? Z.ACT : Z.CARDS;
-    st.act = 0;   // back on the eye
+    st.zone = cards.length ? Z.CARDS : Z.SHELF;   // back on the poster
     updateFocus();
   }
 
@@ -1956,12 +2042,14 @@
     if (target.params && !(stremio() && target.app === stremio())) { launcher(target.app.id, target.app.title, target.params)(); return; }
     if (stremio() && target.app === stremio()) {
       Data.serviceFor(pick, function (found) {
-        if (found) launcher(found.app.id, found.app.title, {link: found.link})();
+        if (found) launcher(found.app.id, found.app.title, TV.takesTitle(found.service) ? {link: found.link, service: found.service} : null)();
         else launcher(target.app.id, target.app.title, target.params)();
       });
       return;
     }
-    Data.titleLink(pick, function (link) { launcher(target.app.id, target.app.title, link ? {link: link} : null)(); });
+    // Only an app that takes a title here is looked up (TV.takesTitle: Prime Video on Samsung); the rest open at home.
+    if (!TV.takesTitle(pick.app)) { launcher(target.app.id, target.app.title, null)(); return; }
+    Data.titleLink(pick, function (link) { launcher(target.app.id, target.app.title, link ? {link: link, service: pick.app} : null)(); });
   }
 
   /** Continue's date for a show's coming episode: a small calendar at the poster's top left, dd/mm. */
@@ -2023,9 +2111,7 @@
       case Z.CARDS:
         var pick = cards[st.card];
         if (pick && pick.more) { startMore(); return; }
-        var target = pickTarget(pick);
-        if (!target) return;
-        openPick(pick, target);
+        if (pick) openDetails(pick);   // its page, where its buttons are (Play first)
         return;
       case Z.SHELF:
         if (shelf[st.shelf] && shelf[st.shelf].allApps) openDrawer();
@@ -2238,7 +2324,7 @@
   }
 
   function back() {
-    if (st.zone === Z.DETAIL) { closeDetails(); return; }   // the page closes (its own Back button goes to the page before)
+    if (st.zone === Z.DETAIL) { detailBack(); return; }   // as the page's ← when it has one (a related title's), else it closes
     if (st.zone === Z.EDIT) {
       setClass($('shelfedit'), 'open', false);
       openSettings();

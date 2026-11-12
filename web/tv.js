@@ -418,14 +418,19 @@ var TV = (function () {
   }
 
   /**
-   * The app opened on a title's page (Watchmode's web address of it): Samsung's apps take a deep link as the app
-   * control's URI or as {"values": ...} under PAYLOAD (Smart Hub's own shortcuts), so both go; an app that reads neither
-   * opens at home as before, and one that refuses the request is opened plainly.
+   * A pick opened on its title (Watchmode's web address of it). Only Prime Video takes one on Samsung: Smart Hub's own
+   * shortcuts open its titles with the eden_resume operation and {"values": "<GTI>"} under PAYLOAD (#483; Tizen 3 and
+   * 9). Disney+, Netflix and HBO Max take the request and open at home whatever the address, the id or the operation
+   * (tried on Tizen 9, the app running or not), so the rest are opened plainly, and not looked up.
    */
-  function samsungDeepLink(id, link, done) {
+  var TITLE_LINKS = {prime: function (link) { var m = /gti=(amzn1\.dv\.gti\.[0-9a-f-]+)/.exec(link); return m ? m[1] : ''; }};
+
+  function samsungDeepLink(id, service, link, done) {
+    var value = TITLE_LINKS[service] ? TITLE_LINKS[service](link) : '';
+    if (!value) { samsungLaunch(id, done); return; }
     try {
-      var control = new window.tizen.ApplicationControl('http://tizen.org/appcontrol/operation/view', link, null, null,
-          [new window.tizen.ApplicationControlData('PAYLOAD', [JSON.stringify({values: link})])]);
+      var control = new window.tizen.ApplicationControl('http://samsung.com/appcontrol/operation/eden_resume', null, null, null,
+          [new window.tizen.ApplicationControlData('PAYLOAD', [JSON.stringify({values: value})])]);
       window.tizen.application.launchAppControl(control, id, function () { if (done) done(true); },
           function () { samsungLaunch(id, done); });
     } catch (e) {
@@ -763,6 +768,9 @@ var TV = (function () {
      */
     canOpenSettings: !tizen2 && !tizen34,
 
+    /** Whether a pick of this service ("prime") can open on its title here: Watchmode is asked only then. */
+    takesTitle: function (service) { return samsung && !!TITLE_LINKS[service]; },
+
     /** A brand's glyph (web/icons/glyph-*.png) by its name ("Xbox"), for an input named in input_names; '' if none. */
     /** That glyph's brand color, '' for the theme's. */
     tintNamed: function (name) {
@@ -842,7 +850,7 @@ var TV = (function () {
         if (id.indexOf('source:') === 0) { stopWatch(); samsungSource(id, done); return; }
         var shown = brewHost[id] || id;   // TizenBrew's modules run in TizenBrew
         var then = function (ok) { if (ok) watchBack(shown); if (done) done(ok); };
-        if (params && params.link) samsungDeepLink(id, params.link, then);
+        if (params && params.link) samsungDeepLink(id, params.service, params.link, then);
         else samsungLaunch(id, then);
         return;
       }

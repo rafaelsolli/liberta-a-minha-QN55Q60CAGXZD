@@ -1190,3 +1190,21 @@ body.searchclosing .round.bare, body.searchclosing .round.bare.focus { color: #1
 /* "Cast" over the people, as "More like this" over the related row: both a little lower. */
 #detail .d-people { top: 622px; }
 #detail .d-rel { top: 828px; }
+
+/* Trakt's progress on a poster: a thin bar near its bottom, over RPDB's ratings strip when it has one; watched ones
+   faded. */
+.card .prog { position: absolute; left: 14px; right: 14px; bottom: 14px; height: 6px; border-radius: 3px; background: rgba(16, 16, 18, 0.6); overflow: hidden; }
+.card .prog.over-rpdb { bottom: 64px; }
+.card .prog .fill { height: 6px; border-radius: 3px; background: #F5F5F7; }
+.card.seen .img { opacity: 0.4; }
+.card.seen.focus .img { opacity: 0.7; }
+
+/* The details page's top right: the title's buttons, a gap, then Back and the X. */
+#detail .d-top .tip { right: auto; left: 50%; -webkit-transform: translateX(-50%); transform: translateX(-50%); }
+#detail .d-top.x .tip { left: auto; right: 0; -webkit-transform: none; transform: none; }
+
+/* Right of the related posters: the focused one's name and line. */
+#detail .d-relinfo { position: absolute; left: 1110px; top: 54px; width: 570px; opacity: 0; -webkit-transition: opacity 0.15s; transition: opacity 0.15s; }
+#detail .d-relinfo.on { opacity: 1; }
+#detail .d-relname { font-size: 34px; font-weight: 700; line-height: 1.15; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; max-height: 80px; }
+#detail .d-relmeta { margin-top: 12px; font-size: 24px; font-weight: 500; color: rgba(245, 245, 247, 0.7); }
