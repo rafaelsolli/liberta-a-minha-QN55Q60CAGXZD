@@ -471,6 +471,83 @@ var TV = (function () {
     }
   }
 
+  // MARK: - Home, back here
+
+  /*
+   * Samsung's Home button always opens Smart Hub, and no app may take it. So while an app opened from here is in front,
+   * the TV's own server (port 8001) is asked every second whether it still is; once it isn't (Home, or the app closed),
+   * this app comes back to the front. It stays running behind the app (background-support), which is what lets it ask.
+   */
+  var back = {timer: null, ids: [], seen: false, asks: 0};
+
+  var HUB_IDS = {'org.tizen.netflix-app': '3201907018807', 'org.tizen.primevideo': '3201910019365',
+    'org.tizen.globoplayapp': '3202007021424', 'com.samsung.tv.aria-video': '3201807016597',
+    'org.tizen.browser': '3202010022079', 'com.samsung.tv.gallery': '3201710015037', 'com.samsung.tv.SmartThingsApp': '3202311033054'};
+
+  function stopWatch() {
+    if (back.timer) clearInterval(back.timer);
+    back.timer = null;
+  }
+
+  /** The app's status from the TV's server: done(true | false), or done(null) when it knows none of its ids. */
+  function visible(ids, done) {
+    var i = 0;
+    function next() {
+      if (i >= ids.length) { done(null); return; }
+      var x = new XMLHttpRequest(), over = false, id = ids[i++];
+      x.open('GET', 'http://127.0.0.1:8001/api/v2/applications/' + encodeURIComponent(id), true);
+      x.timeout = 2500;
+      x.onreadystatechange = function () {
+        if (x.readyState !== 4 || over) return;
+        over = true;
+        var r = null;
+        try { r = JSON.parse(x.responseText); } catch (e) {}
+        if (x.status === 200 && r && typeof r.visible === 'boolean') { ids.length = 0; ids.push(id); done(r.visible); }
+        else next();   // that id unknown here: the next one (the package's number answers for some apps)
+      };
+      x.ontimeout = x.onerror = function () { if (!over) { over = true; done(undefined); } };   // no answer: ask again next time
+      x.send();
+    }
+    next();
+  }
+
+  function comeBack() {
+    var self = '';
+    try { self = window.tizen.application.getCurrentApplication().appInfo.id; } catch (e) {}
+    if (!self) return;
+    try {
+      window.tizen.application.launch(self, null, function () { post('/api/v2/applications/' + self, 5000, null); });
+    } catch (e) {
+      post('/api/v2/applications/' + self, 5000, null);
+    }
+  }
+
+  function watchBack(id) {
+    stopWatch();
+    if (!samsung || !id) return;
+    back.ids = [id];
+    // The server knows some apps only by their Smart Hub number (Netflix's 3201907018807): HUB_IDS has this TV's
+    // (`0 vd_applist` over SDB lists each app_id), and the icon's path, where it holds one, tells the others.
+    try {
+      var info = window.tizen.application.getAppInfo(id), hub = /\/(\d{9,})\//.exec(info.iconPath || '');
+      if (hub) back.ids.push(hub[1]);
+      if (info.packageId && info.packageId !== id) back.ids.push(info.packageId);
+    } catch (e) {}
+    if (HUB_IDS[id]) back.ids.push(HUB_IDS[id]);
+    back.seen = false;
+    back.asks = 0;
+    back.timer = setInterval(function () {
+      if (!document.hidden) { stopWatch(); return; }   // back here already
+      if (++back.asks > 40 && !back.seen) { stopWatch(); return; }   // never came up: nothing to watch
+      visible(back.ids, function (on) {
+        if (!back.timer) return;
+        if (on === null) { stopWatch(); return; }   // the TV doesn't know it: leave it be
+        if (on === true) { back.seen = true; return; }
+        if (on === false && back.seen && document.hidden) { stopWatch(); comeBack(); }
+      });
+    }, 1000);
+  }
+
   // MARK: - The antenna
 
   // The last antenna channel seen on screen (the viewer keeps Samsung TV Plus's too, and goes back to it).
@@ -752,9 +829,10 @@ var TV = (function () {
     /** Opens an app (or an input); done(ok). */
     launch: function (id, params, done) {
       if (samsung) {
-        if (id.indexOf('source:') === 0) samsungSource(id, done);
-        else if (params && params.link) samsungDeepLink(id, params.link, done);
-        else samsungLaunch(id, done);
+        if (id.indexOf('source:') === 0) { stopWatch(); samsungSource(id, done); return; }
+        var shown = brewHost[id] || id;   // TizenBrew's modules run in TizenBrew
+        if (params && params.link) samsungDeepLink(id, params.link, then);
+        else samsungLaunch(id, then);
         return;
       }
       if (!webos) {
