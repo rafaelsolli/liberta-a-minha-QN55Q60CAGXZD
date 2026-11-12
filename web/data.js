@@ -1645,17 +1645,27 @@ var Trakt = (function () {
 
   function signedIn() { return !!load().refresh; }
 
+  // A renewal in flight: the requests that need a token wait for it, so the refresh token is spent once (two renewals
+  // at a time would send the same one twice, and Trakt would refuse the second and sign the TV out).
+  var renewing = null;
+
   /** A valid access token, renewed when it's about to expire; done(error, token). */
   function token(done) {
     var v = load();
     if (!v.refresh) { done(new Error('not signed in')); return; }
     if (Date.now() < v.expires - 3600000) { done(null, v.access); return; }
-    send('POST', '/oauth/token', {refresh_token: v.refresh, client_id: ID, redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+    if (renewing) { renewing.push(done); return; }
+    renewing = [done];
+    var refresh = v.refresh;
+    send('POST', '/oauth/token', {refresh_token: refresh, client_id: ID, redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
         grant_type: 'refresh_token'}, '', function (s, t) {
-      if (s === 400 || s === 401) { save({}); changed(); done(new Error('Trakt signed this TV out')); return; }
-      if (s !== 200 || !t) { done(new Error('Trakt returned HTTP ' + s)); return; }
-      keep(t);
-      done(null, t.access_token);
+      var waiting = renewing, err = null, access = '';
+      renewing = null;
+      if (load().refresh !== refresh) err = new Error('not signed in');   // signed out (or in again) meanwhile
+      else if (s === 400 || s === 401) { save({}); err = new Error('Trakt signed this TV out'); changed(); }
+      else if (s !== 200 || !t) err = new Error('Trakt returned HTTP ' + s);   // no answer: the tokens stay for next time
+      else { keep(t); access = t.access_token; }
+      for (var i = 0; i < waiting.length; i++) waiting[i](err, access);
     });
   }
 
