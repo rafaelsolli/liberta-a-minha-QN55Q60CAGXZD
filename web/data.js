@@ -182,7 +182,7 @@ var Data = (function () {
   }
 
   var listeners = [];
-  function changed() { for (var i = 0; i < listeners.length; i++) listeners[i](); }
+  function changed() { candVer++; for (var i = 0; i < listeners.length; i++) listeners[i](); }   // what a list holds may differ
 
   // MARK: - Weather
 
@@ -1543,7 +1543,7 @@ var Trakt = (function () {
 
   function load() { try { return JSON.parse(localStorage.getItem('fmtv.trakt')) || {}; } catch (e) { return {}; } }
   function save(v) { try { localStorage.setItem('fmtv.trakt', JSON.stringify(v)); } catch (e) {} }
-  function changed() { candVer++; for (var i = 0; i < listeners.length; i++) listeners[i](); }   // what a list holds may differ
+  function changed() { for (var i = 0; i < listeners.length; i++) listeners[i](); }
 
   /** SHA-256 of an ASCII string, as bytes (ES5 has no crypto.subtle on old TVs; only the PKCE challenge needs it). */
   function sha256(text) {
